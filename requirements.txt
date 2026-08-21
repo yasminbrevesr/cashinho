@@ -1,0 +1,4 @@
+# O nucleo de analise e o motor multi-timeframe rodam em Python puro.
+# As dependencias abaixo sao opcionais, so para provedores de dados e testes.
+yfinance>=0.2   # fonte gratuita de candles da B3 (ticker + .SA), com ~15min de atraso
+pytest>=7       # testes
