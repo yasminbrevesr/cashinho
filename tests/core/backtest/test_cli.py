@@ -82,3 +82,29 @@ def test_csv_inexistente_falha_com_mensagem(capsys):
 def test_data_invalida_e_recusada():
     with pytest.raises(SystemExit):
         main(["--inicio", "20-08-2026"])
+
+
+def test_comparar_timeframes_pela_linha_de_comando(capsys):
+    codigo, saida = _rodar(["--comparar", "--dias", "5", "--timeframes", "5m,15m"], capsys)
+
+    assert codigo == 0
+    assert "COMPARAR TIMEFRAMES" in saida
+    assert "TABELA COMPARATIVA" in saida
+    assert "VEREDITO" in saida
+    assert "5m" in saida and "15m" in saida
+
+
+def test_comparar_em_json(capsys):
+    _, saida = _rodar(["--comparar", "--dias", "5", "--timeframes", "5m,15m", "--json"], capsys)
+    dados = json.loads(saida)
+
+    assert dados["symbol"] == "PETR4"
+    assert [l["timeframe"] for l in dados["linhas"]] == ["5m", "15m"]
+    assert "veredito" in dados
+
+
+def test_comparar_aceita_1h_como_60m(capsys):
+    _, saida = _rodar(["--comparar", "--dias", "5", "--timeframes", "1h", "--json"], capsys)
+    dados = json.loads(saida)
+
+    assert dados["linhas"][0]["timeframe"] == "60m"

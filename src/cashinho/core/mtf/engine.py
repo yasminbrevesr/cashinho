@@ -180,17 +180,23 @@ class MTFVista:
         return self._engine.config
 
     # -- acesso seguro ---------------------------------------------------
-    def barras_fechadas(self, timeframe: str) -> list[Bar]:
-        """Barras ja fechadas no instante da vista (pode vir vazio)."""
+    def barras_fechadas(self, timeframe: str, limite: Optional[int] = None) -> list[Bar]:
+        """Barras ja fechadas no instante da vista (pode vir vazio).
+
+        ``limite`` devolve apenas as ultimas N barras. Em backtest e' o que
+        evita recalcular indicadores sobre a serie inteira a cada candle - um
+        custo que cresce com o quadrado do tamanho da serie.
+        """
         rotulo = rotulo_canonico(timeframe)
         bars = self._engine.barras(rotulo)
         corte = bisect_right(self._engine._fins[rotulo], self.instante)
-        return bars[:corte]
+        inicio = max(corte - limite, 0) if limite else 0
+        return bars[inicio:corte]
 
-    def fechados(self, timeframe: str) -> Series:
+    def fechados(self, timeframe: str, limite: Optional[int] = None) -> Series:
         """Serie pronta para os indicadores, so com candles fechados."""
         rotulo = rotulo_canonico(timeframe)
-        return bars_para_series(self._engine.symbol, rotulo, self.barras_fechadas(rotulo))
+        return bars_para_series(self._engine.symbol, rotulo, self.barras_fechadas(rotulo, limite))
 
     def ultima_barra(self, timeframe: str) -> Bar:
         """Ultima barra fechada. Levanta se a unica disponivel ainda esta em formacao."""
@@ -208,8 +214,8 @@ class MTFVista:
         """Candle fechado mais recente da camada configurada (ex.: ``"contexto"``)."""
         return self.ultimo(self.config.timeframe(papel).rotulo)
 
-    def serie_da_camada(self, papel: str) -> Series:
-        return self.fechados(self.config.timeframe(papel).rotulo)
+    def serie_da_camada(self, papel: str, limite: Optional[int] = None) -> Series:
+        return self.fechados(self.config.timeframe(papel).rotulo, limite)
 
     def snapshot(self) -> dict[str, Optional[Candle]]:
         """Ultimo candle fechado de cada camada; ``None`` onde ainda nao fechou."""

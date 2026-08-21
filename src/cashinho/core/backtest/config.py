@@ -35,6 +35,7 @@ class BacktestConfig:
     fechar_em: Optional[time] = time(17, 40)  # zera a posicao (day trade)
 
     # --- regras de execucao -------------------------------------------------
+    janela_maxima: Optional[int] = 400  # candles entregues a estrategia por avaliacao
     prioridade_intracandle: str = "stop"  # "stop" | "alvo" | "nenhuma"
     sair_no_sinal_contrario: bool = False
     permitir_venda: bool = True
@@ -49,6 +50,8 @@ class BacktestConfig:
             )
         if self.inicio and self.fim and self.inicio > self.fim:
             raise ValueError("inicio depois do fim")
+        if self.janela_maxima is not None and self.janela_maxima < 2:
+            raise ValueError("janela_maxima precisa ser pelo menos 2 candles (ou None)")
         # o capital do backtest manda no capital do risco
         if self.risco.capital != self.capital_inicial:
             object.__setattr__(self, "risco", self.risco.atualizar(capital=self.capital_inicial))

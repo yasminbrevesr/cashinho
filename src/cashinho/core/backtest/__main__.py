@@ -24,10 +24,12 @@ from ...data.csv_provider import CSVProvider
 from ...data.synthetic import SyntheticProvider
 from ..risk.config import RiskConfig
 from ..strategy.base import disponiveis, obter
+from .comparacao import TIMEFRAMES_PADRAO, comparar as comparar_timeframes
 from .config import BacktestConfig
 from .costs import ModeloCustos
 from .engine import BacktestEngine
 from .view import pagina, resumo
+from .view_comparacao import pagina_comparacao
 
 
 def _data(texto: str) -> date:
@@ -75,6 +77,12 @@ def construir_parser() -> argparse.ArgumentParser:
     execucao.add_argument("--fechar-em", type=_hora, default="17:40")
     execucao.add_argument("--intracandle", choices=["stop", "alvo", "nenhuma"], default="stop")
     execucao.add_argument("--semente", type=int, default=42, help="semente da fonte demo")
+
+    comparar = p.add_argument_group("comparar timeframes")
+    comparar.add_argument("--comparar", action="store_true",
+                          help="roda a mesma estrategia em varios timeframes e compara")
+    comparar.add_argument("--timeframes", default=",".join(TIMEFRAMES_PADRAO),
+                          help="lista separada por virgula (padrao: 1m,5m,15m,30m,60m,1d)")
 
     saida = p.add_argument_group("saida")
     saida.add_argument("--trades", type=int, default=20, help="quantos trades listar")
@@ -132,6 +140,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         fechar_em=args.fechar_em,
         prioridade_intracandle=args.intracandle,
     )
+
+    if args.comparar:
+        timeframes = [t.strip() for t in args.timeframes.split(",") if t.strip()]
+        comparacao = comparar_timeframes(
+            lambda: obter(args.estrategia), serie, config, timeframes
+        )
+        if args.json:
+            print(json.dumps(comparacao.para_dict(), indent=2, ensure_ascii=False))
+        else:
+            cores = not args.sem_cor and sys.stdout.isatty()
+            print(pagina_comparacao(comparacao, cores=cores))
+            if args.fonte == "demo":
+                print("\n  fonte: dados sinteticos (--fonte demo). Nao sao precos reais.")
+        return 0
 
     resultado = BacktestEngine(estrategia, config).rodar(serie)
 

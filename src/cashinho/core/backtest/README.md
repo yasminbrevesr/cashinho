@@ -105,3 +105,53 @@ Resultado passado com uma amostra pequena nao diz nada sobre o futuro. O
 engine avisa sozinho quando ha menos de 20 pregoes ou menos de 30 trades, e a
 pagina carimba o aviso de estrategia experimental. Trate os numeros como
 sanidade da implementacao, nao como promessa.
+
+## Comparar Timeframes
+
+Roda a **mesma** estrategia, nos **mesmos** dados, com os **mesmos** custos,
+capital, horario e limites de risco - so o timeframe de decisao muda:
+
+```
+python -m cashinho.core.backtest --comparar --ativo PETR4 --dias 60 --capital 100000
+python -m cashinho.core.backtest --comparar --timeframes 5m,15m,60m --json
+```
+
+Padrao: `1m, 5m, 15m, 30m, 60m, 1d`.
+
+Mostra tabela (trades, retorno, drawdown, profit factor, Sharpe, win rate,
+expectancy e custos), graficos de barras por grandeza e uma dispersao
+**risco x retorno** - um eixo para cada grandeza, nunca dois eixos y no mesmo
+grafico.
+
+### O melhor timeframe nao e' o que rendeu mais
+
+A nota final combina seis criterios, todos em **escala absoluta** (um
+timeframe nao vira bom por ser o menos ruim da lista):
+
+| criterio | peso | nota maxima em |
+|---|---|---|
+| retorno sobre drawdown | 0,25 | 3x o drawdown |
+| sharpe | 0,18 | 2,0 |
+| profit factor | 0,18 | 2,0 |
+| drawdown contido | 0,16 | 0% (zero a partir de 20%) |
+| expectancy (R) | 0,13 | 0,50 R por trade |
+| peso dos custos | 0,10 | custos ate 20% do lucro bruto |
+
+Depois a nota inteira e' multiplicada pela **confianca da amostra**
+(`raiz(trades / 30)`, saturando em 1). Tamanho de amostra nao torna uma
+estrategia boa - torna a estimativa confiavel -, entao ele nao entra como
+mais um criterio somado: ele desconta o conjunto. Sem isso, um timeframe com
+um unico trade vencedor (drawdown zero, expectancy otima) lideraria a
+comparacao.
+
+Alem da nota, ha cortes duros que **reprovam** o timeframe: retorno nao
+positivo, menos de 10 trades, drawdown acima de 25% ou profit factor abaixo
+de 1. **Nenhum timeframe aprovado e' um resultado valido** - e a tela diz
+isso em vez de eleger o menos pior.
+
+O maior retorno tambem aparece, como contraponto: quando ele nao e' o
+recomendado, o veredito mostra os dois lado a lado, com o drawdown e o numero
+de trades que ele custou.
+
+`comparacao.para_dict()` entrega tudo em JSON, inclusive a nota de cada
+criterio, para uma interface grafica.

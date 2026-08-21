@@ -12,12 +12,24 @@ O engine nao depende de interface: recebe serie e estrategia, devolve
 :class:`BacktestResult`. Quem desenha e' o modulo ``view``.
 """
 
+from .comparacao import (
+    PADRAO as CRITERIOS_PADRAO,
+    TIMEFRAMES_PADRAO,
+    ComparacaoTimeframes,
+    CriterioNota,
+    CriteriosComparacao,
+    LinhaComparacao,
+    StatusTimeframe,
+    avaliar,
+    comparar,
+)
 from .config import BacktestConfig
 from .costs import SEM_CUSTOS, ModeloCustos
 from .engine import BacktestEngine
 from .metrics import calcular, max_drawdown, retornos_diarios, sharpe, sortino
 from .models import BacktestResult, BacktestTrade, Metricas, MotivoSaida, PontoEquity
 from .view import curva_de_capital, lista_de_trades, pagina, painel_metricas
+from .view_comparacao import barras, dispersao, graficos, pagina_comparacao, tabela
 
 __all__ = [
     "BacktestEngine",
@@ -38,4 +50,18 @@ __all__ = [
     "curva_de_capital",
     "lista_de_trades",
     "painel_metricas",
+    "comparar",
+    "avaliar",
+    "ComparacaoTimeframes",
+    "LinhaComparacao",
+    "CriteriosComparacao",
+    "CriterioNota",
+    "StatusTimeframe",
+    "TIMEFRAMES_PADRAO",
+    "CRITERIOS_PADRAO",
+    "pagina_comparacao",
+    "tabela",
+    "graficos",
+    "dispersao",
+    "barras",
 ]

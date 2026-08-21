@@ -233,7 +233,7 @@ class BacktestEngine:
     # ------------------------------------------------------------------
     def _avaliar(self, vista, symbol: str, tf_setup: str) -> Optional[Signal]:
         try:
-            serie = vista.fechados(tf_setup)
+            serie = vista.fechados(tf_setup, limite=self.config.janela_maxima)
             if len(serie) == 0:
                 return None
             contexto = StrategyContext(symbol=symbol, serie=serie)
