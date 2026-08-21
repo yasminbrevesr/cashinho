@@ -1,0 +1,156 @@
+"""Enumeracoes centrais do dominio.
+
+Toda a semantica de modo, timeframe e estado de oportunidade vive aqui.
+Nenhum outro modulo deve declarar strings livres para estes conceitos.
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from enum import StrEnum
+
+
+class Mode(StrEnum):
+    """Modos de operacao do Cashinho.
+
+    A separacao e rigida: cada modo tem exigencias distintas de dados,
+    de latencia e de autorizacao. O modo padrao do sistema e PAPER.
+    """
+
+    RESEARCH = "RESEARCH"
+    BACKTEST = "BACKTEST"
+    REPLAY = "REPLAY"
+    PAPER = "PAPER"
+    ASSISTED = "ASSISTED"
+    LIVE = "LIVE"
+
+    @property
+    def touches_real_money(self) -> bool:
+        """Modos que podem resultar em ordem real enviada ao mercado."""
+        return self in {Mode.ASSISTED, Mode.LIVE}
+
+    @property
+    def requires_realtime_data(self) -> bool:
+        """Modos que exigem dado ao vivo, nao historico."""
+        return self in {Mode.PAPER, Mode.ASSISTED, Mode.LIVE}
+
+
+class Timeframe(StrEnum):
+    """Timeframes suportados."""
+
+    M1 = "1m"
+    M5 = "5m"
+    M15 = "15m"
+    M30 = "30m"
+    H1 = "60m"
+    D1 = "1D"
+
+    @property
+    def duration(self) -> timedelta:
+        """Duracao nominal de um candle deste timeframe."""
+        return _TIMEFRAME_DURATION[self]
+
+    @property
+    def is_intraday(self) -> bool:
+        return self is not Timeframe.D1
+
+    @property
+    def pandas_freq(self) -> str:
+        """Alias de frequencia usado em resample do pandas."""
+        return _TIMEFRAME_FREQ[self]
+
+
+_TIMEFRAME_DURATION: dict[Timeframe, timedelta] = {
+    Timeframe.M1: timedelta(minutes=1),
+    Timeframe.M5: timedelta(minutes=5),
+    Timeframe.M15: timedelta(minutes=15),
+    Timeframe.M30: timedelta(minutes=30),
+    Timeframe.H1: timedelta(hours=1),
+    Timeframe.D1: timedelta(days=1),
+}
+
+_TIMEFRAME_FREQ: dict[Timeframe, str] = {
+    Timeframe.M1: "1min",
+    Timeframe.M5: "5min",
+    Timeframe.M15: "15min",
+    Timeframe.M30: "30min",
+    Timeframe.H1: "60min",
+    Timeframe.D1: "1D",
+}
+
+
+class TimeframeRole(StrEnum):
+    """Papel de um timeframe dentro do modelo multi-timeframe.
+
+    Modelo preferencial inicial: 60m contexto, 15m tendencia,
+    5m setup, 1m gatilho. A associacao concreta e configuravel.
+    """
+
+    CONTEXT = "CONTEXTO"
+    TREND = "TENDENCIA"
+    SETUP = "SETUP"
+    TRIGGER = "GATILHO"
+
+
+class Side(StrEnum):
+    """Direcao da operacao."""
+
+    LONG = "COMPRA"
+    SHORT = "VENDA"
+
+
+class OpportunityState(StrEnum):
+    """Estados validos de uma oportunidade.
+
+    NAO_OPERAR e uma decisao perfeitamente valida e terminal.
+    """
+
+    APROVADO = "SETUP APROVADO"
+    AGUARDANDO_GATILHO = "AGUARDANDO GATILHO"
+    REJEITADO = "SETUP REJEITADO"
+    NAO_OPERAR = "NAO OPERAR"
+    EXPIRADO = "EXPIRADO"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in {
+            OpportunityState.REJEITADO,
+            OpportunityState.NAO_OPERAR,
+            OpportunityState.EXPIRADO,
+        }
+
+    @property
+    def allows_execution(self) -> bool:
+        """Apenas SETUP APROVADO habilita geracao de boleta."""
+        return self is OpportunityState.APROVADO
+
+
+class DataStatus(StrEnum):
+    """Resultado do portao de qualidade de dados.
+
+    BLOCKED interrompe o pipeline. Nao e aviso, e parada.
+    """
+
+    OK = "OK"
+    DEGRADED = "DEGRADED"
+    BLOCKED = "BLOCKED"
+
+    @property
+    def allows_analysis(self) -> bool:
+        return self is not DataStatus.BLOCKED
+
+
+class Severity(StrEnum):
+    """Gravidade de um problema de qualidade de dados."""
+
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
+class FactorDirection(StrEnum):
+    """Direcao da contribuicao de um fator no score."""
+
+    FAVORAVEL = "FAVORAVEL"
+    CONTRARIO = "CONTRARIO"
+    NEUTRO = "NEUTRO"

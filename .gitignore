@@ -1,0 +1,42 @@
+# --- Segredos: nunca versionar ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# --- Dados locais e cache de mercado ---
+# Fixtures sao regeneraveis: scripts/generate_fixtures.py
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.eggs/
+
+# --- Testes e ferramentas ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- Editores / SO ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
