@@ -212,11 +212,12 @@ class LeituraMultiTimeframe:
 
 
 @dataclass(frozen=True)
-class Opportunity:
-    """So nasce quando uma regra configurada e' inteiramente satisfeita.
+class Candidata:
+    """Uma candidata a oportunidade: as regras fecharam, falta pontuar.
 
-    Nao e' ordem: nao tem quantidade. Os niveis sao referencias para o Risk
-    Manager dimensionar - e ele continua podendo dizer nao.
+    Quem transforma isto em :class:`~cashinho.core.oportunidade.Opportunity`,
+    com score e estado, e' o Opportunity Engine. Aqui ficam so o veredito das
+    regras, a direcao e os niveis de referencia.
     """
 
     symbol: str

@@ -133,7 +133,7 @@ def test_camada_ausente_nao_vira_neutra_por_engano():
 
     assert "context" in resultado.leitura.faltando
     assert resultado.leitura.camada("context") is None
-    assert resultado.oportunidade is None
+    assert resultado.candidata is None
     for a in resultado.avaliacoes:
         if a.regra.exigencias["context"]:
             assert not a.satisfeita

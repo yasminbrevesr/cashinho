@@ -36,7 +36,7 @@ def test_avaliar_devolve_leitura_avaliacoes_e_oportunidade():
 
     assert resultado.leitura.instante == vista.instante
     assert len(resultado.avaliacoes) == len(ENGINE.regras)
-    assert resultado.tem_oportunidade == (resultado.oportunidade is not None)
+    assert resultado.tem_candidata == (resultado.candidata is not None)
 
 
 def test_sem_regra_satisfeita_nao_ha_oportunidade():
@@ -44,7 +44,7 @@ def test_sem_regra_satisfeita_nao_ha_oportunidade():
     resultado = ENGINE.avaliar(vista, "PETR4")
 
     if not resultado.satisfeitas:
-        assert resultado.oportunidade is None
+        assert resultado.candidata is None
 
 
 def test_oportunidade_traz_niveis_coerentes():
@@ -54,8 +54,8 @@ def test_oportunidade_traz_niveis_coerentes():
     encontrada = None
     for vista in m.replay():
         resultado = engine.avaliar(vista, "PETR4")
-        if resultado.oportunidade is not None:
-            encontrada = resultado.oportunidade
+        if resultado.candidata is not None:
+            encontrada = resultado.candidata
             break
 
     if encontrada is not None:
@@ -68,10 +68,10 @@ def test_oportunidade_traz_niveis_coerentes():
 
 def test_oportunidade_nao_tem_quantidade():
     """Dimensionar e' do Risk Manager - a oportunidade so descreve."""
-    from cashinho.core.confluencia.modelos import Opportunity
+    from cashinho.core.confluencia.modelos import Candidata
     import dataclasses
 
-    campos = {f.name for f in dataclasses.fields(Opportunity)}
+    campos = {f.name for f in dataclasses.fields(Candidata)}
     assert not campos & {"quantidade", "position_size", "ordem"}
 
 
@@ -124,8 +124,8 @@ def test_sinal_acionavel_so_com_oportunidade():
             continue
         sinal = estrategia.avaliar(de_vista(vista, "PETR4", papel_setup="setup",
                                             papel_tendencia="trend"))
-        tem_oportunidade = sinal.extras.get("oportunidade") is not None
-        assert sinal.action.acionavel == tem_oportunidade
+        tem_candidata = sinal.extras.get("candidata") is not None
+        assert sinal.action.acionavel == tem_candidata
 
 
 def test_estrategia_esta_registrada():

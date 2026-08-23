@@ -116,6 +116,11 @@ def tela_analise(sinal: Signal, cores: bool = False) -> str:
         linhas.append("")
         linhas.append(secao_mtf)
 
+    secao_score = _secao_score(sinal, cores)
+    if secao_score:
+        linhas.append("")
+        linhas.append(secao_score)
+
     linhas.append("")
     linhas.append(_c(" INVALIDACAO", "negrito", ativo=cores))
     linhas.append(f"   {sinal.invalidation}")
@@ -134,6 +139,16 @@ def _secao_multitimeframe(sinal: Signal, cores: bool) -> str:
     from ..confluencia.view import secao_multitimeframe
 
     return secao_multitimeframe(leitura, sinal.extras.get("avaliacoes", ()), cores)
+
+
+def _secao_score(sinal: Signal, cores: bool) -> str:
+    """Abre o score da oportunidade quando o sinal trouxer uma."""
+    oportunidade = sinal.extras.get("oportunidade")
+    if oportunidade is None or getattr(oportunidade, "score_detalhado", None) is None:
+        return ""
+    from ..oportunidade.view import painel_score
+
+    return painel_score(oportunidade.score_detalhado, cores)
 
 
 def _bloco_fatores(fatores, cor: str, cores: bool, vazio: str) -> list[str]:

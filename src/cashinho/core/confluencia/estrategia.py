@@ -46,10 +46,10 @@ class EstrategiaConfluencia(Strategy):
 
         resultado = self.engine.avaliar(vista, contexto.symbol)
         leitura = resultado.leitura
-        oportunidade = resultado.oportunidade
+        candidata = resultado.candidata
         fatores = _fatores(leitura, resultado.avaliacoes)
 
-        if oportunidade is None:
+        if candidata is None:
             return Signal(
                 symbol=contexto.symbol,
                 timestamp=leitura.instante,
@@ -66,26 +66,26 @@ class EstrategiaConfluencia(Strategy):
                 extras={"multitimeframe": leitura, "avaliacoes": resultado.avaliacoes},
             )
 
-        action = Action.BUY if oportunidade.direcao.value == "COMPRA" else Action.SELL
+        action = Action.BUY if candidata.direcao.value == "COMPRA" else Action.SELL
         return Signal(
             symbol=contexto.symbol,
-            timestamp=oportunidade.instante,
+            timestamp=candidata.instante,
             timeframe=self._timeframe(leitura),
             action=action,
-            setup=f"{oportunidade.regra} ({oportunidade.resumo_das_camadas})",
-            confidence=oportunidade.confianca,
-            reasons=oportunidade.razoes,
-            invalidation=oportunidade.invalidacao,
+            setup=f"{candidata.regra} ({candidata.resumo_das_camadas})",
+            confidence=candidata.confianca,
+            reasons=candidata.razoes,
+            invalidation=candidata.invalidacao,
             strategy=self.nome,
-            vies=oportunidade.direcao,
+            vies=candidata.direcao,
             factors=fatores,
-            niveis=oportunidade.niveis,
+            niveis=candidata.niveis,
             experimental=True,
             aviso=AVISO,
             extras={
                 "multitimeframe": leitura,
                 "avaliacoes": resultado.avaliacoes,
-                "oportunidade": oportunidade,
+                "candidata": candidata,
             },
         )
 

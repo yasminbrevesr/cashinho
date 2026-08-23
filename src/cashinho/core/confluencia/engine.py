@@ -33,7 +33,7 @@ from ..mtf import MTFConfig, MTFEngine, MTFError
 from ..mtf.engine import MTFVista
 from .estados import PAPEIS_PADRAO, Vies
 from .leitura import LEITORES, ConfigLeitura
-from .modelos import Camada, LeituraMultiTimeframe, Opportunity
+from .modelos import Camada, Candidata, LeituraMultiTimeframe
 from .regras import REGRAS_PADRAO, AvaliacaoRegra, RegraOportunidade
 
 CAMADAS_CONFLUENCIA = {"context": "60m", "trend": "15m", "setup": "5m", "trigger": "1m"}
@@ -51,11 +51,11 @@ class ResultadoConfluencia:
 
     leitura: LeituraMultiTimeframe
     avaliacoes: list[AvaliacaoRegra] = field(default_factory=list)
-    oportunidade: Optional[Opportunity] = None
+    candidata: Optional[Candidata] = None
 
     @property
-    def tem_oportunidade(self) -> bool:
-        return self.oportunidade is not None
+    def tem_candidata(self) -> bool:
+        return self.candidata is not None
 
     @property
     def satisfeitas(self) -> list[AvaliacaoRegra]:
@@ -71,7 +71,7 @@ class ResultadoConfluencia:
         return {
             "leitura": self.leitura.para_dict(),
             "avaliacoes": [a.para_dict() for a in self.avaliacoes],
-            "oportunidade": self.oportunidade.para_dict() if self.oportunidade else None,
+            "candidata": self.candidata.para_dict() if self.candidata else None,
         }
 
 
@@ -159,14 +159,14 @@ class MultiTimeframeEngine:
         avaliacoes = [regra.avaliar(leitura) for regra in self.regras]
         satisfeitas = [a for a in avaliacoes if a.satisfeita]
 
-        oportunidade = None
+        candidata = None
         if satisfeitas:
             melhor = max(satisfeitas, key=lambda a: a.confianca)
-            oportunidade = self._montar(leitura, melhor)
+            candidata = self._montar(leitura, melhor)
 
-        return ResultadoConfluencia(leitura=leitura, avaliacoes=avaliacoes, oportunidade=oportunidade)
+        return ResultadoConfluencia(leitura=leitura, avaliacoes=avaliacoes, candidata=candidata)
 
-    def _montar(self, leitura: LeituraMultiTimeframe, avaliacao: AvaliacaoRegra) -> Opportunity:
+    def _montar(self, leitura: LeituraMultiTimeframe, avaliacao: AvaliacaoRegra) -> Candidata:
         direcao = avaliacao.vies.direcao
         niveis = self._niveis(leitura, direcao)
         # so entram as razoes das camadas que sustentam ESTA direcao: uma
@@ -175,7 +175,7 @@ class MultiTimeframeEngine:
         razoes = tuple(avaliacao.motivos) + tuple(
             c.razoes[0] for c in leitura.camadas if c.vies is vies_alvo and c.razoes
         )
-        return Opportunity(
+        return Candidata(
             symbol=leitura.symbol,
             instante=leitura.instante,
             direcao=direcao,
