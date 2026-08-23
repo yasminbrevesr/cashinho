@@ -20,3 +20,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# todos os testes do projeto sao funcoes; desligar a coleta de classes evita
+# que nomes em portugues como TesteProtegidoError sejam confundidos com testes
+python_classes = []
