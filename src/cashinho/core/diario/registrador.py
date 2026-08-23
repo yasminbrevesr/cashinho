@@ -116,7 +116,10 @@ class BrokerComDiario(Broker):
     def __init__(self, broker: Broker, diario: Optional[DiarioDeTrades] = None,
                  arquivo: Optional[Path] = None):
         self.broker = broker
-        self.diario = diario or DiarioDeTrades()
+        # `diario or DiarioDeTrades()` seria uma armadilha: DiarioDeTrades
+        # define __len__, entao um diario VAZIO e' falsy e seria trocado por
+        # outro em silencio - os registros iriam para um objeto que ninguem ve
+        self.diario = diario if diario is not None else DiarioDeTrades()
         self.arquivo = Path(arquivo) if arquivo else None
         self._contextos: dict[str, ContextoDeEntrada] = {}
         self._registradas: int = len(self.diario)

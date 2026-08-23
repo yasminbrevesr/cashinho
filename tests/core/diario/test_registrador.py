@@ -231,3 +231,25 @@ def test_empilhado_com_o_risco_tambem_registra():
 
     assert len(b.diario) == 1
     assert b.diario.registros[0].resultado > 0
+
+
+def test_um_diario_vazio_passado_no_construtor_e_o_mesmo_objeto():
+    """DiarioDeTrades define __len__: vazio e' falsy, e `x or Y()` o trocaria."""
+    meu = DiarioDeTrades()
+    assert len(meu) == 0 and not meu  # falsy de proposito
+
+    paper = PaperBroker(ConfigPaper(capital_inicial=100_000.0, custos=SEM_CUSTOS),
+                        lambda: AGORA)
+    b = BrokerComDiario(paper, meu)
+
+    assert b.diario is meu
+
+
+def test_o_registro_cai_no_diario_que_foi_passado():
+    meu = DiarioDeTrades()
+    b, paper, relogio = _broker()
+    b.diario = meu
+    b._registradas = 0
+    _abre_e_fecha(b, paper, relogio)
+
+    assert len(meu) == 1
