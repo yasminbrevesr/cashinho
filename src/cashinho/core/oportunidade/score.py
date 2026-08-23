@@ -114,23 +114,56 @@ class ComponenteScore:
 
 
 @dataclass(frozen=True)
+class Penalidade:
+    """Um desconto no score, com a origem por escrito."""
+
+    chave: str
+    nome: str
+    valor: float   # positivo: quanto desconta
+    motivo: str = ""
+
+    def para_dict(self) -> dict:
+        return {"chave": self.chave, "nome": self.nome,
+                "valor": round(self.valor, 2), "motivo": self.motivo}
+
+
+@dataclass(frozen=True)
 class ScoreDetalhado:
     """O score final com o caminho inteiro ate ele."""
 
     componentes: tuple[ComponenteScore, ...]
     pesos: PesosScore = PESOS_PADRAO
+    # descontos aplicados FORA dos componentes - hoje, a agenda de eventos.
+    # Ficam a parte de proposito: um evento nao e' uma leitura de preco, e
+    # somar isso dentro de um componente esconderia de onde veio o desconto
+    penalidades: tuple["Penalidade", ...] = ()
 
     @property
     def soma_dos_pesos(self) -> float:
         return sum(c.peso for c in self.componentes)
 
     @property
-    def total(self) -> float:
-        """Media ponderada das notas, de 0 a 100."""
+    def total_bruto(self) -> float:
+        """Media ponderada das notas, de 0 a 100, antes das penalidades."""
         soma = self.soma_dos_pesos
         if soma <= 0:
             return 0.0
         return round(sum(c.nota * c.peso for c in self.componentes) / soma, 1)
+
+    @property
+    def desconto(self) -> float:
+        return round(sum(p.valor for p in self.penalidades), 1)
+
+    @property
+    def total(self) -> float:
+        """O score que vale: bruto menos as penalidades, preso entre 0 e 100."""
+        return round(max(0.0, min(100.0, self.total_bruto - self.desconto)), 1)
+
+    def com_penalidade(self, penalidade: "Penalidade") -> "ScoreDetalhado":
+        """Devolve uma copia com mais uma penalidade registrada."""
+        if penalidade.valor <= 0:
+            return self
+        return replace(self, penalidades=self.penalidades + (penalidade,))
 
     def componente(self, chave: str) -> Optional[ComponenteScore]:
         for c in self.componentes:
@@ -150,6 +183,8 @@ class ScoreDetalhado:
         soma = self.soma_dos_pesos
         return {
             "total": self.total,
+            "total_bruto": self.total_bruto,
+            "penalidades": [p.para_dict() for p in self.penalidades],
             "pesos": self.pesos.para_dict(),
             "componentes": [
                 {

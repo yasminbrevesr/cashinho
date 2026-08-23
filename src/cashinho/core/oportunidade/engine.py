@@ -27,6 +27,7 @@ from .modelos import Opportunity
 from .score import (
     PESOS_PADRAO,
     ConfigScore,
+    Penalidade,
     PesosScore,
     ScoreDetalhado,
     calcular,
@@ -76,11 +77,15 @@ class OpportunityEngine:
         pesos: Optional[PesosScore] = None,
         config: Optional[ConfigOportunidade] = None,
         janela: int = 400,
+        eventos=None,
     ):
         self.confluencia = confluencia or MultiTimeframeEngine()
         self.pesos = pesos or PESOS_PADRAO
         self.config = config or ConfigOportunidade()
         self.janela = janela
+        # avaliador de noticias e eventos (opcional). Ele so sabe descontar
+        # score, aumentar risco e bloquear - nunca aprovar
+        self.eventos = eventos
         self._cache_estrutura: dict = {}
 
     # ------------------------------------------------------------------
@@ -118,8 +123,23 @@ class OpportunityEngine:
             entry=entry, stop=stop, target=target, cfg=self.config.score,
         )
         detalhado = calcular(ctx, self.pesos)
+
+        # a agenda entra ANTES do estado ser decidido: o desconto de score e o
+        # bloqueio precisam valer na mesma conta que aprova ou rejeita
+        eventos = self._eventos(leitura.symbol, agora, direcao)
+        if eventos is not None and eventos.ajuste_de_score:
+            detalhado = detalhado.com_penalidade(Penalidade(
+                "eventos", "Noticias e eventos", -eventos.ajuste_de_score,
+                "; ".join(e.event_type.curto + " " + e.alvo for e in eventos.eventos[:3]),
+            ))
+
         avisos = self._avisos(leitura, ctx, detalhado)
+        if eventos is not None:
+            avisos = avisos + tuple(eventos.avisos)
         estado, motivo = self._estado(resultado, leitura, detalhado, ctx)
+        if eventos is not None and eventos.bloqueado:
+            # bloqueio so rebaixa: ele nunca promove um estado
+            estado, motivo = EstadoOportunidade.NAO_OPERAR, eventos.motivo
 
         candidata = resultado.candidata
         return Opportunity(
@@ -145,6 +165,7 @@ class OpportunityEngine:
             leitura=leitura,
             regra=candidata.regra if candidata else "",
             motivo_do_estado=motivo,
+            eventos=eventos,
         )
 
     # ------------------------------------------------------------------
@@ -207,6 +228,12 @@ class OpportunityEngine:
     def _expira_em(self, agora: datetime, tf_trigger: str) -> datetime:
         minutos = parse_timeframe(tf_trigger).minutos or 5
         return agora + timedelta(minutes=minutos * self.config.expiracao_candles_gatilho)
+
+    def _eventos(self, symbol: str, agora: datetime, direcao):
+        """A leitura da agenda de eventos - ou None quando nao ha avaliador."""
+        if self.eventos is None:
+            return None
+        return self.eventos.avaliar(symbol, agora, direcao)
 
     def _estado(self, resultado, leitura: LeituraMultiTimeframe,
                 detalhado: ScoreDetalhado, ctx) -> tuple[EstadoOportunidade, str]:

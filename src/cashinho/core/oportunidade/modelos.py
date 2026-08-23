@@ -45,6 +45,10 @@ class Opportunity:
     leitura: Optional[LeituraMultiTimeframe] = None
     regra: str = ""
     motivo_do_estado: str = ""
+    # leitura da agenda de noticias e eventos, quando o motor tem um avaliador.
+    # Fica como Optional[object] para o modulo de oportunidade nao depender do
+    # de noticias: a agenda e' um insumo opcional, nao parte do contrato
+    eventos: Optional[object] = None
 
     # ------------------------------------------------------------------
     def expirada_em(self, agora: datetime) -> bool:
@@ -99,6 +103,7 @@ class Opportunity:
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "estado": self.estado.value,
             "motivo_do_estado": self.motivo_do_estado,
+            "eventos": self.eventos.para_dict() if self.eventos is not None else None,
             "regra": self.regra,
             "score_detalhado": self.score_detalhado.para_dict() if self.score_detalhado else None,
         }

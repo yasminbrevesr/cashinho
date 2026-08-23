@@ -325,9 +325,60 @@ def test_score_serializa_inteiro():
     dados = calcular(contexto()).para_dict()
     texto = json.dumps(dados)
 
-    assert set(dados) == {"total", "pesos", "componentes"}
+    assert set(dados) == {"total", "total_bruto", "penalidades", "pesos", "componentes"}
     assert len(dados["componentes"]) == 11
     for c in dados["componentes"]:
         assert set(c) >= {"chave", "nome", "nota", "peso", "contribuicao", "leitura"}
     assert '"leitura"' in texto
 
+
+
+# ---------------------------------------------------------------------------
+# penalidades: descontos aplicados fora dos componentes
+# ---------------------------------------------------------------------------
+
+
+def test_sem_penalidade_o_total_e_o_bruto():
+    detalhado = calcular(contexto())
+
+    assert detalhado.total == detalhado.total_bruto
+    assert detalhado.desconto == 0
+
+
+def test_a_penalidade_desconta_do_total_sem_apagar_o_bruto():
+    from cashinho.core.oportunidade.score import Penalidade
+
+    base = calcular(contexto())
+    com = base.com_penalidade(Penalidade("eventos", "Noticias e eventos", 15.0, "Copom"))
+
+    assert com.total_bruto == base.total_bruto
+    assert com.total == pytest.approx(max(0.0, base.total_bruto - 15.0), abs=0.1)
+    assert com.desconto == 15.0
+
+
+def test_o_score_com_penalidade_nao_fica_negativo():
+    from cashinho.core.oportunidade.score import Penalidade
+
+    detalhado = calcular(contexto()).com_penalidade(
+        Penalidade("eventos", "Noticias e eventos", 500.0))
+
+    assert detalhado.total == 0.0
+
+
+def test_penalidade_zerada_e_ignorada():
+    from cashinho.core.oportunidade.score import Penalidade
+
+    base = calcular(contexto())
+
+    assert base.com_penalidade(Penalidade("x", "x", 0.0)) is base
+
+
+def test_as_penalidades_aparecem_no_payload():
+    from cashinho.core.oportunidade.score import Penalidade
+
+    dados = calcular(contexto()).com_penalidade(
+        Penalidade("eventos", "Noticias e eventos", 12.0, "Copom em 20 min")).para_dict()
+
+    assert dados["penalidades"][0]["valor"] == 12.0
+    assert dados["penalidades"][0]["motivo"] == "Copom em 20 min"
+    assert dados["total"] < dados["total_bruto"]

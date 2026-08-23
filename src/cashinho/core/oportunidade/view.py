@@ -93,6 +93,16 @@ def painel_score(detalhado: ScoreDetalhado, cores: bool = False, mostrar_peso: b
         linhas.append(f"   {'':<21s} └ {c.leitura}")
     linhas.append("   " + "─" * (LARGURA - 6))
     total = detalhado.total
+    if detalhado.penalidades:
+        # o desconto aparece como linha, nao como numero que mudou sozinho
+        linhas.append(f"   {'score dos componentes':<21s} {'':<10s} {detalhado.total_bruto:>5.0f}")
+        for pen in detalhado.penalidades:
+            linhas.append(
+                f"   {pen.nome:<21s} {'':<10s} "
+                + _c(f"{-pen.valor:>5.0f}", "vermelho", ativo=cores)
+            )
+            if pen.motivo:
+                linhas.append(f"   {'':<21s} └ {pen.motivo}")
     linhas.append(
         f"   {'SCORE FINAL':<21s} {_c(barra(total), _cor_da_nota(total), ativo=cores)} "
         + _c(f"{total:>5.0f}", _cor_da_nota(total), "negrito", ativo=cores)
@@ -166,6 +176,14 @@ def pagina_oportunidade(op: Opportunity, agora=None, cores: bool = False,
 
         linhas.append("")
         linhas.append(secao_contexto(contexto, cores))
+
+    if op.eventos is not None:
+        from ..noticias.view import secao_noticias
+
+        linhas.append("")
+        linhas.append(secao_noticias(
+            getattr(op.eventos, "agenda", None), op.timestamp, op.symbol, cores,
+            avaliacao=op.eventos))
 
     if op.score_detalhado is not None:
         linhas.append("")
