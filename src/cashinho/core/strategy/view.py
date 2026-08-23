@@ -121,6 +121,11 @@ def tela_analise(sinal: Signal, cores: bool = False) -> str:
         linhas.append("")
         linhas.append(secao_score)
 
+    secao_auditoria = _secao_auditor(sinal, cores)
+    if secao_auditoria:
+        linhas.append("")
+        linhas.append(secao_auditoria)
+
     linhas.append("")
     linhas.append(_c(" INVALIDACAO", "negrito", ativo=cores))
     linhas.append(f"   {sinal.invalidation}")
@@ -149,6 +154,16 @@ def _secao_score(sinal: Signal, cores: bool) -> str:
     from ..oportunidade.view import painel_score
 
     return painel_score(oportunidade.score_detalhado, cores)
+
+
+def _secao_auditor(sinal: Signal, cores: bool) -> str:
+    """Mostra o veredito do auditor quando o sinal trouxer um."""
+    auditoria = sinal.extras.get("auditoria")
+    if auditoria is None:
+        return ""
+    from ..auditor.view import secao_auditor
+
+    return secao_auditor(auditoria, cores)
 
 
 def _bloco_fatores(fatores, cor: str, cores: bool, vazio: str) -> list[str]:
