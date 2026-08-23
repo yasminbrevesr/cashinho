@@ -163,3 +163,23 @@ def test_o_gerente_nao_expoe_nenhum_atalho_de_aprovacao():
     proibidos = {"forcar", "aprovar", "permitir", "override", "ignorar_limites", "liberar_ordem"}
 
     assert not (metodos & proibidos)
+
+
+def test_abrir_com_menos_do_que_o_autorizado_registra_o_que_foi_executado():
+    """Quem pediu menos abriu menos - a exposicao precisa refletir a execucao."""
+    rm = gerente()
+    d = rm.avaliar(compra(entrada=10.0, stop=9.5))
+    assert d.position_size > 100
+
+    posicao = rm.abrir(d, quantidade=100)
+
+    assert posicao.quantidade == 100
+    assert rm.estado.exposicao_de("PETR4") == pytest.approx(1_000.0)
+
+
+def test_abrir_com_mais_do_que_o_autorizado_e_recusado():
+    rm = gerente()
+    d = rm.avaliar(compra(entrada=10.0, stop=9.5))
+
+    with pytest.raises(RiskRejectionError, match="autorizadas pelo risco"):
+        rm.abrir(d, quantidade=d.position_size + 1)

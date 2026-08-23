@@ -259,8 +259,15 @@ class RiskManager:
     # ------------------------------------------------------------------
     # execucao
     # ------------------------------------------------------------------
-    def abrir(self, decisao: RiskDecision, preco_execucao: Optional[float] = None) -> Position:
-        """Registra a posicao. So aceita decisao aprovada emitida por este gerente."""
+    def abrir(self, decisao: RiskDecision, preco_execucao: Optional[float] = None,
+              quantidade: Optional[int] = None) -> Position:
+        """Registra a posicao. So aceita decisao aprovada emitida por este gerente.
+
+        ``quantidade`` permite registrar uma execucao MENOR que a autorizada -
+        quem pediu 100 acoes com 3.225 aprovadas abriu 100, e o risco precisa
+        saber disso, senao a exposicao vira ficcao. Maior que o autorizado e'
+        recusado: seria furar a decisao pela porta dos fundos.
+        """
         if decisao.rejeitada:
             raise RiskRejectionError(f"operacao rejeitada pelo risco: {decisao.reason}")
 
@@ -278,11 +285,20 @@ class RiskManager:
                 "decisao nao reconhecida: so decisoes emitidas por este Risk Manager "
                 "(e ainda nao usadas) podem abrir posicao"
             )
+        tamanho = decisao.position_size if quantidade is None else int(quantidade)
+        if tamanho > decisao.position_size:
+            raise RiskRejectionError(
+                f"tentativa de abrir {tamanho} acoes com apenas {decisao.position_size} "
+                f"autorizadas pelo risco"
+            )
+        if tamanho <= 0:
+            raise RiskRejectionError(f"quantidade invalida para abrir posicao: {tamanho}")
+
         self._aprovadas.pop(decisao.id)
         posicao = Position(
             symbol=decisao.symbol,
             direcao=decisao.direcao,
-            quantidade=decisao.position_size,
+            quantidade=tamanho,
             preco_medio=preco_execucao if preco_execucao is not None else decisao.entrada,
             stop=decisao.stop,
             aberta_em=self._relogio(),
