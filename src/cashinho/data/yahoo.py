@@ -20,9 +20,15 @@ _MAX_DIAS_INTRADAY = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59, "60m": 
 
 
 def sufixo_b3(symbol: str) -> str:
-    """PETR4 -> PETR4.SA; indices e tickers ja com ponto passam intactos."""
+    """PETR4 -> PETR4.SA; o que ja e' ticker do Yahoo passa intacto.
+
+    Passam intactos: indices (``^BVSP``), tickers com ponto (``PETR4.SA``),
+    cambio (``USDBRL=X``) e futuros (``BZ=F``). Somar ``.SA`` a esses ultimos
+    produzia ``USDBRL=X.SA``, que nao existe - o download voltava vazio e o
+    ativo sumia da leitura sem que ninguem entendesse por que.
+    """
     s = symbol.strip().upper()
-    if "." in s or s.startswith("^"):
+    if "." in s or s.startswith("^") or "=" in s:
         return s
     return f"{s}.SA"
 

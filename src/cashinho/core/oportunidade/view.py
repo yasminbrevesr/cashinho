@@ -113,8 +113,14 @@ def resumo_score(detalhado: ScoreDetalhado) -> str:
 # ---------------------------------------------------------------------------
 
 
-def pagina_oportunidade(op: Opportunity, agora=None, cores: bool = False) -> str:
-    """A tela completa de uma oportunidade."""
+def pagina_oportunidade(op: Opportunity, agora=None, cores: bool = False,
+                        contexto=None) -> str:
+    """A tela completa de uma oportunidade.
+
+    ``contexto`` e' um ``MarketContext`` opcional: quando vem, a tela ganha a
+    secao CONTEXTO DO MERCADO. Opcional de proposito - a oportunidade se
+    explica sozinha, e o contexto e' ambiente em volta dela.
+    """
     estado = op.estado_em(agora) if agora else op.estado
     linhas = [
         _c(f"OPORTUNIDADE · {op.symbol} · {op.timestamp:%d/%m %H:%M}", "negrito", ativo=cores),
@@ -154,6 +160,12 @@ def pagina_oportunidade(op: Opportunity, agora=None, cores: bool = False) -> str
         f"   contexto {op.timeframe_context} · tendencia {op.timeframe_trend} · "
         f"setup {op.timeframe_setup} · gatilho {op.timeframe_trigger}"
     )
+
+    if contexto is not None:
+        from ..contexto.view import secao_contexto
+
+        linhas.append("")
+        linhas.append(secao_contexto(contexto, cores))
 
     if op.score_detalhado is not None:
         linhas.append("")
