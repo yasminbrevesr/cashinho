@@ -111,10 +111,29 @@ def tela_analise(sinal: Signal, cores: bool = False) -> str:
             if chave in sinal.niveis:
                 linhas.append(f"   {rotulo:<9s} {formata_dinheiro(sinal.niveis[chave]):>12s}")
 
+    secao_mtf = _secao_multitimeframe(sinal, cores)
+    if secao_mtf:
+        linhas.append("")
+        linhas.append(secao_mtf)
+
     linhas.append("")
     linhas.append(_c(" INVALIDACAO", "negrito", ativo=cores))
     linhas.append(f"   {sinal.invalidation}")
     return "\n".join(linhas)
+
+
+def _secao_multitimeframe(sinal: Signal, cores: bool) -> str:
+    """Renderiza a leitura multi-timeframe quando o sinal trouxer uma.
+
+    O import e' local de proposito: a tela nao depende do modulo de
+    confluencia, so sabe desenhar o que ele anexa.
+    """
+    leitura = sinal.extras.get("multitimeframe")
+    if leitura is None:
+        return ""
+    from ..confluencia.view import secao_multitimeframe
+
+    return secao_multitimeframe(leitura, sinal.extras.get("avaliacoes", ()), cores)
 
 
 def _bloco_fatores(fatores, cor: str, cores: bool, vazio: str) -> list[str]:

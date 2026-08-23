@@ -236,7 +236,8 @@ class BacktestEngine:
             serie = vista.fechados(tf_setup, limite=self.config.janela_maxima)
             if len(serie) == 0:
                 return None
-            contexto = StrategyContext(symbol=symbol, serie=serie)
+            contexto = StrategyContext(symbol=symbol, serie=serie,
+                                       extras={"instante": vista.instante, "vista": vista})
         except ValueError:
             return None
         return self.estrategia.avaliar(contexto)

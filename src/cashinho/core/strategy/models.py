@@ -95,6 +95,10 @@ class Signal:
     niveis: dict = field(default_factory=dict)  # precos de REFERENCIA, nao ordens
     experimental: bool = True
     aviso: str = ""
+    # payload livre para quem produz o sinal anexar contexto extra (a leitura
+    # multi-timeframe, por exemplo). Nao entra no para_dict: nao ha garantia
+    # de que o conteudo seja serializavel.
+    extras: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:

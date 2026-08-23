@@ -69,5 +69,5 @@ def de_vista(
         symbol=symbol or serie.symbol,
         serie=serie,
         serie_tendencia=superior,
-        extras={"instante": vista.instante},
+        extras={"instante": vista.instante, "vista": vista},
     )
