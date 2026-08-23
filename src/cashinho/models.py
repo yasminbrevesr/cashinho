@@ -35,9 +35,26 @@ class Direction(str, Enum):
         return Direction.SHORT if self is Direction.LONG else Direction.LONG
 
 
+class CandleInvalidoError(ValueError):
+    """Candle que nao pode existir - e por isso nao existe."""
+
+
+# folga para ruido de ponto flutuante: um close 1e-12 acima da maxima veio de
+# aritmetica, nao do mercado
+_TOLERANCIA = 1e-9
+
+
 @dataclass(frozen=True)
 class Candle:
-    """Um candle OHLCV."""
+    """Um candle OHLCV.
+
+    O candle e' o atomo de todo o sistema: ATR, estrutura, stop, tamanho de
+    posicao e preco de ordem saem dele. Por isso ele **recusa estado
+    impossivel** em vez de propagar numero sem sentido - maxima abaixo da
+    minima, fechamento fora do range, preco negativo, volume negativo. Um
+    provedor que receba lixo descarta a linha; o que nao pode e' o lixo entrar
+    calado e virar tamanho de posicao la na frente.
+    """
 
     ts: datetime
     open: float
@@ -45,6 +62,27 @@ class Candle:
     low: float
     close: float
     volume: float
+
+    def __post_init__(self) -> None:
+        for nome in ("open", "high", "low", "close"):
+            valor = getattr(self, nome)
+            if valor != valor or valor in (float("inf"), float("-inf")):
+                raise CandleInvalidoError(f"{nome} nao e' um numero ({valor!r})")
+            if valor <= 0:
+                raise CandleInvalidoError(
+                    f"{nome} precisa ser maior que zero (recebido {valor})")
+        if self.volume != self.volume or self.volume < 0:
+            raise CandleInvalidoError(f"volume negativo ou invalido ({self.volume})")
+
+        folga = _TOLERANCIA * max(1.0, abs(self.high))
+        if self.high + folga < self.low:
+            raise CandleInvalidoError(
+                f"maxima {self.high} abaixo da minima {self.low}")
+        for nome in ("open", "close"):
+            valor = getattr(self, nome)
+            if not (self.low - folga <= valor <= self.high + folga):
+                raise CandleInvalidoError(
+                    f"{nome} {valor} fora do range [{self.low}, {self.high}]")
 
     @property
     def range(self) -> float:

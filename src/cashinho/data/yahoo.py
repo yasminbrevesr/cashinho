@@ -81,14 +81,17 @@ class YahooProvider(Provider):
                 l = float(_valor(linha, "Low", ticker))
                 c = float(_valor(linha, "Close", ticker))
                 v = float(_valor(linha, "Volume", ticker) or 0.0)
+                if any(x != x for x in (o, h, l, c)):  # NaN
+                    continue
+                dt = ts.to_pydatetime()
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=BRT)
+                # a validacao do Candle mora no proprio Candle: linha
+                # incoerente (maxima abaixo da minima, preco zerado) e'
+                # descartada aqui, e nao vira serie
+                candles.append(Candle(dt.astimezone(BRT), o, h, l, c, v))
             except (TypeError, ValueError):
                 continue
-            if any(x != x for x in (o, h, l, c)):  # NaN
-                continue
-            dt = ts.to_pydatetime()
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=BRT)
-            candles.append(Candle(dt.astimezone(BRT), o, h, l, c, v))
 
         if not candles:
             raise DataError(f"sem candles validos para {ticker} ({timeframe})")

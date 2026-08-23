@@ -115,8 +115,10 @@ def perfil_volume(candles: Sequence[Candle], n_bins: int = 24, area_valor: float
     baldes = [0.0] * n_bins
     for c in candles:
         v = c.volume if c.volume > 0 else 1.0
-        i0 = max(int((c.low - lo) / largura), 0)
-        i1 = min(int((c.high - lo) / largura), n_bins - 1)
+        # os dois indices precisam do mesmo limite: um candle parado na
+        # maxima da serie cai um balde alem do fim e deixava n = 0
+        i0 = min(max(int((c.low - lo) / largura), 0), n_bins - 1)
+        i1 = min(max(int((c.high - lo) / largura), 0), n_bins - 1)
         n = i1 - i0 + 1
         parte = v / n
         for i in range(i0, i1 + 1):

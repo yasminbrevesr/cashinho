@@ -100,9 +100,9 @@ class FonteBCB(FonteDeContexto):
                 dia = datetime.strptime(linha["data"], "%d/%m/%Y").replace(
                     hour=10, minute=0, tzinfo=BRT)
                 valor = float(str(linha["valor"]).replace(",", "."))
+                candles.append(Candle(dia, valor, valor, valor, valor, 0.0))
             except (KeyError, TypeError, ValueError):
                 continue  # linha estranha e' descartada, nunca "corrigida"
-            candles.append(Candle(dia, valor, valor, valor, valor, 0.0))
 
         if not candles:
             raise DataError(f"SGS {codigo}: resposta sem valores utilizaveis")

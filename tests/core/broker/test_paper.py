@@ -380,3 +380,36 @@ def test_estado_vai_e_volta_do_disco():
     assert voltou.get_positions()[0].quantidade == 100
     assert voltou.kill_switch_ativo is True
     assert len(voltou.get_orders()) == len(b.get_orders())
+
+
+# ---------------------------------------------------------------------------
+# OCO como ordem unica: recusada com o caminho certo
+# ---------------------------------------------------------------------------
+
+
+def test_oco_como_ordem_unica_e_recusada():
+    """Ela caia no ramo de stop e o preco limite era ignorado em silencio:
+    o operador achava que tinha gain, e nao tinha."""
+    b = paper()
+    b.atualizar_preco("PETR4", 30.0)
+
+    resposta = b.place_order(ordem(tipo=OrderType.OCO, side=Direction.SHORT,
+                                   preco_limite=32.0, preco_disparo=28.0))
+
+    assert resposta.status is OrderStatus.REJEITADA
+    assert "place_oco" in resposta.motivo
+
+
+def test_o_par_oco_continua_funcionando():
+    b = paper()
+    b.atualizar_preco("PETR4", 30.0)
+    b.place_order(ordem(tipo=OrderType.MARKET, side=Direction.LONG))
+
+    sl, tp = b.place_oco(
+        ordem(tipo=OrderType.STOP_LOSS, side=Direction.SHORT, preco_disparo=29.0),
+        ordem(tipo=OrderType.TAKE_PROFIT, side=Direction.SHORT, preco_limite=31.0),
+    )
+
+    assert sl.status is not OrderStatus.REJEITADA
+    assert tp.status is not OrderStatus.REJEITADA
+    assert sl.oco_id == tp.oco_id

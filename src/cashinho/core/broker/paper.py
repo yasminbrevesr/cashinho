@@ -217,6 +217,13 @@ class PaperBroker(Broker):
     def _validar(self, order: Order) -> str:
         if order.quantidade <= 0:
             return f"quantidade invalida ({order.quantidade})"
+        if order.tipo is OrderType.OCO:
+            # OCO e' um PAR ligado, nao um tipo de ordem solta: uma ordem
+            # unica com esse tipo caia no ramo de stop e o preco limite era
+            # ignorado em silencio - o operador achava que tinha gain, e nao
+            # tinha. Aqui ela e' recusada com o caminho certo
+            return ("OCO e' um par ligado: use place_oco(stop_loss, take_profit) "
+                    "em vez de uma ordem unica do tipo OCO")
         if not order.symbol or not order.symbol.strip():
             return "ativo nao informado"
         if order.tipo.precisa_limite and order.preco_limite is None:
