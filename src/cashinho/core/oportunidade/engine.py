@@ -156,7 +156,9 @@ class OpportunityEngine:
         Sem este cache, um backtest de 1m recalcularia pivos, zonas e
         Fibonacci a cada minuto sobre a mesma serie de 5m.
         """
-        chave = (serie_setup.timeframe, serie_setup.last.ts, len(serie_setup))
+        # o symbol faz parte da chave: numa varredura, dois ativos tem o
+        # mesmo timeframe, o mesmo ultimo candle e o mesmo tamanho de serie
+        chave = (serie_setup.symbol, serie_setup.timeframe, serie_setup.last.ts, len(serie_setup))
         if chave not in self._cache_estrutura:
             self._cache_estrutura[chave] = analisar_estrutura(serie_setup, self.config.estrutura)
         return self._cache_estrutura[chave]

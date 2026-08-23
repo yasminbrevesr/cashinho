@@ -128,7 +128,10 @@ class MultiTimeframeEngine:
 
             fechado_em = barras[-1].fim
             serie = Series(symbol or vista._engine.symbol, timeframe, [b.candle for b in barras])
-            chave = (papel, timeframe, fechado_em)
+            # o symbol entra na chave: sem ele, dois ativos com o mesmo
+            # timestamp de fechamento (o caso normal numa varredura) leriam
+            # a camada um do outro
+            chave = (serie.symbol, papel, timeframe, fechado_em)
             if chave not in self._cache:
                 # a leitura de uma camada so muda quando o candle DELA fecha:
                 # guardar por (papel, fechamento) evita recalcular a cada tick

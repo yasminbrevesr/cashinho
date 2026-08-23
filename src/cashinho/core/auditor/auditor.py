@@ -74,7 +74,7 @@ class ContrarianAuditor:
         return ctx
 
     def _estrutura(self, serie):
-        chave = (serie.timeframe, serie.last.ts, len(serie))
+        chave = (serie.symbol, serie.timeframe, serie.last.ts, len(serie))
         if chave not in self._cache_estrutura:
             self._cache_estrutura[chave] = analisar_estrutura(serie, self.cfg_estrutura)
         return self._cache_estrutura[chave]
