@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 from ...models import formata_dinheiro
-from .base import Broker
+from .base import Broker, broker_base
 from .modelos import Balance, Operacao, Order, OrderStatus, Position
 
 LARGURA = 84
@@ -170,9 +170,7 @@ def pagina(broker: Broker, cores: bool = False, limite_ordens: Optional[int] = N
     todas = broker.get_orders()
     operacoes = broker.get_trades()
 
-    precos = getattr(broker, "_precos", None) or getattr(
-        getattr(broker, "broker", None), "_precos", {}
-    )
+    precos = _precos_de(broker)
     pnl_aberto = sum(p.pnl_aberto(precos.get(p.symbol.upper(), p.preco_medio)) for p in posicoes)
 
     linhas = [
@@ -208,14 +206,21 @@ def pagina(broker: Broker, cores: bool = False, limite_ordens: Optional[int] = N
     return "\n".join(linhas)
 
 
+def _precos_de(broker: Broker) -> dict:
+    return getattr(broker_base(broker), "_precos", {}) or {}
+
+
 def _kill_switch(broker: Broker) -> tuple[bool, str]:
-    interno = getattr(broker, "broker", None)
-    for alvo in (broker, interno):
-        if alvo is not None and getattr(alvo, "kill_switch_ativo", False):
+    alvo = broker
+    for _ in range(4):
+        if alvo is None:
+            break
+        if getattr(alvo, "kill_switch_ativo", False):
             return True, getattr(alvo, "kill_switch_motivo", "")
-    risco = getattr(broker, "risco", None)
-    if risco is not None and risco.estado.kill_switch is not None:
-        return True, risco.estado.kill_switch.motivo
+        risco = getattr(alvo, "risco", None)
+        if risco is not None and risco.estado.kill_switch is not None:
+            return True, risco.estado.kill_switch.motivo
+        alvo = getattr(alvo, "broker", None)
     return False, ""
 
 

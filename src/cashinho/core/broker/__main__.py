@@ -28,6 +28,7 @@ from ..backtest.costs import ModeloCustos
 from ..risk.config import RiskConfig
 from ..risk.manager import RiskManager
 from ..risk.state import RiskState
+from .base import broker_base
 from .modelos import Order, OrderType
 from .paper import ConfigPaper, PaperBroker
 from .risco import BrokerComRisco
@@ -38,6 +39,14 @@ PASTA_PADRAO = Path.home() / ".cashinho"
 
 def _caminhos(pasta: Path) -> tuple[Path, Path, Path]:
     return pasta / "paper.json", pasta / "risco.json", pasta / "risco-estado.json"
+
+
+def _arquivo_diario(pasta: Path) -> Path:
+    return pasta / "diario.jsonl"
+
+
+def _arquivo_contextos(pasta: Path) -> Path:
+    return pasta / "diario-contextos.json"
 
 
 def carregar(pasta: Path, capital: float) -> BrokerComRisco:
@@ -58,16 +67,35 @@ def carregar(pasta: Path, capital: float) -> BrokerComRisco:
         if arq_estado.exists()
         else RiskState(capital_inicial=config.capital)
     )
-    return BrokerComRisco(paper, RiskManager(config, estado))
+    # o diario acompanha por fora: toda operacao encerrada vira registro
+    # sem ninguem precisar lembrar de anotar
+    from ..diario import BrokerComDiario, DiarioDeTrades
+
+    arquivo = _arquivo_diario(pasta)
+    com_diario = BrokerComDiario(
+        BrokerComRisco(paper, RiskManager(config, estado)),
+        DiarioDeTrades.carregar(arquivo),
+        arquivo=arquivo,
+    )
+    contextos = _arquivo_contextos(pasta)
+    if contextos.exists():
+        com_diario.carregar_contextos(json.loads(contextos.read_text()))
+    return com_diario
 
 
-def salvar(pasta: Path, broker: BrokerComRisco) -> None:
+def salvar(pasta: Path, broker) -> None:
     arq_paper, arq_config, arq_estado = _caminhos(pasta)
     pasta.mkdir(parents=True, exist_ok=True)
-    arq_paper.write_text(json.dumps(broker.broker.para_dict(), indent=2, ensure_ascii=False))
-    broker.risco.config.salvar(arq_config)
-    arq_estado.write_text(json.dumps(broker.risco.estado.para_dict_completo(), indent=2,
+    paper = broker_base(broker)
+    com_risco = broker.broker if hasattr(broker, "diario") else broker
+    arq_paper.write_text(json.dumps(paper.para_dict(), indent=2, ensure_ascii=False))
+    com_risco.risco.config.salvar(arq_config)
+    arq_estado.write_text(json.dumps(com_risco.risco.estado.para_dict_completo(), indent=2,
                                      ensure_ascii=False))
+    if hasattr(broker, "contextos_para_dict"):
+        _arquivo_contextos(pasta).write_text(
+            json.dumps(broker.contextos_para_dict(), indent=2, ensure_ascii=False)
+        )
 
 
 def _tipo(texto: str) -> OrderType:
@@ -154,6 +182,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             quantidade=args.quantidade, preco_limite=args.preco,
             preco_disparo=args.disparo, stop_referencia=args.stop,
         )
+        if args.stop and hasattr(broker, "anotar_contexto"):
+            # entrada manual: sem Opportunity, mas com stop - da para o diario
+            # calcular risco e R:R
+            broker.anotar_contexto(
+                args.ativo.upper(), stop=args.stop,
+                setup="entrada manual", motivo_entrada=("ordem enviada na mao",),
+            )
         enviada = broker.place_order(ordem)
         saida.append(f"{enviada.id}: {enviada.descricao} -> {enviada.status.value}")
         if enviada.motivo:
@@ -194,7 +229,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         alvo, valor = args.ativo.upper(), args.valor
         agora = datetime.now(BRT)
         executadas = broker.processar(alvo, Candle(agora, valor, valor, valor, valor, 0.0))
-        broker.broker.atualizar_preco(alvo, valor)
+        broker_base(broker).atualizar_preco(alvo, valor)
         saida.append(f"{alvo} a {valor:.2f}: {len(executadas)} ordem(ns) executada(s)")
         for o in executadas:
             saida.append(f"  {o.id} {o.tipo.value} a {o.preco_executado:.2f}")

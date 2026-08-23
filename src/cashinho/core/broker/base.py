@@ -30,6 +30,21 @@ class SaldoInsuficienteError(BrokerError):
     """Nao ha caixa para a ordem."""
 
 
+def broker_base(broker: "Broker", limite: int = 6) -> "Broker":
+    """Desce pelos embrulhos ate a corretora que realmente executa.
+
+    Brokers sao empilhaveis (risco, diario, o que vier), e alcancar o de
+    baixo com ``.broker.broker`` quebra toda vez que uma camada nova entra.
+    """
+    alvo = broker
+    for _ in range(limite):
+        interno = getattr(alvo, "broker", None)
+        if interno is None:
+            return alvo
+        alvo = interno
+    return alvo
+
+
 class Broker(ABC):
     """Contrato minimo de uma corretora."""
 
