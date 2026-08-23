@@ -94,3 +94,30 @@ def test_mesma_semente_repete_a_analise(capsys):
 
     a, b = json.loads(um), json.loads(dois)
     assert a["linhas"] == b["linhas"]  # a analise e' identica; so o relogio da varredura muda
+
+
+def test_boleta_de_ativo_sem_setup_aprovado_explica_sem_erro(capsys):
+    codigo, saida = _rodar([*BASE, "--boleta", "PETR4"], capsys)
+
+    assert codigo == 0
+    assert "PETR4" in saida
+    assert "BOLETA GENIAL" in saida
+    # sem setup aprovado, a boleta nao e' gerada - e a tela diz por que
+    assert "BOLETA NAO GERADA" in saida or "Quantidade" in saida
+
+
+def test_boleta_de_ativo_fora_da_watchlist(capsys):
+    codigo, saida = _rodar([*BASE, "--boleta", "MGLU3"], capsys)
+
+    assert codigo == 2
+    assert "nao esta na watchlist" in saida
+
+
+def test_a_boleta_avisa_que_nao_envia_ordem(capsys):
+    _, saida = _rodar([*BASE, "--boleta", "PETR4"], capsys)
+    minusculo = saida.lower()
+
+    assert "NAO ENVIA ORDEM" in saida
+    # nenhuma frase que sugira que algo foi transmitido para a corretora
+    for alegacao in ("ordem enviada", "ordem transmitida", "enviamos", "ordem executada na genial"):
+        assert alegacao not in minusculo

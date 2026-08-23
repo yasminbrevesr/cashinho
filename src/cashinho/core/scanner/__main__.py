@@ -60,9 +60,38 @@ def construir_parser() -> argparse.ArgumentParser:
     saida.add_argument("--operaveis", action="store_true",
                        help="so o que esta liberado ou aguardando gatilho")
     saida.add_argument("--detalhe", metavar="ATIVO", help="mostra a trilha completa de um ativo")
+    saida.add_argument("--boleta", metavar="ATIVO",
+                       help="gera a boleta da Genial para um ativo liberado (nao envia ordem)")
+    saida.add_argument("--copiar", action="store_true",
+                       help="com --boleta: imprime so os campos, prontos para copiar")
     saida.add_argument("--json", action="store_true")
     saida.add_argument("--sem-cor", action="store_true")
     return p
+
+
+def _boleta(resultado, ativo: str, copiar: bool, cores: bool) -> int:
+    """Traduz a oportunidade de um ativo em boleta para digitacao manual."""
+    from ..genial import TicketGenerator, bloco_para_copiar
+    from ..genial import pagina as pagina_boleta
+
+    alvo = ativo.strip().upper()
+    linha = next((l for l in resultado.linhas if l.symbol == alvo), None)
+    if linha is None:
+        print(f"{alvo} nao esta na watchlist desta varredura")
+        return 2
+    if linha.oportunidade is None:
+        print(f"{alvo} nao chegou a gerar oportunidade ({linha.status.value}): {linha.motivo}")
+        return 0
+
+    ticket = TicketGenerator().gerar(linha.oportunidade, linha.risco)
+    if not copiar:
+        print(f"{alvo} · {linha.status.value}\n")
+    if copiar:
+        texto = bloco_para_copiar(ticket)
+        print(texto if texto else f"boleta nao gerada: {ticket.motivo}")
+    else:
+        print(pagina_boleta(ticket, cores))
+    return 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -110,6 +139,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     cores = not args.sem_cor and sys.stdout.isatty()
+    if args.boleta:
+        return _boleta(resultado, args.boleta, args.copiar, cores)
+
     if args.detalhe:
         alvo = args.detalhe.strip().upper()
         linha = next((l for l in resultado.linhas if l.symbol == alvo), None)
