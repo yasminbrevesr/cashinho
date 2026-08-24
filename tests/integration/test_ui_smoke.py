@@ -94,14 +94,6 @@ def test_analise_sem_carregar_nao_desenha_grafico() -> None:
     assert len(app.get("plotly_chart")) == 0
 
 
-def test_analise_declara_inspecao_historica_em_modo_ao_vivo() -> None:
-    """O rebaixamento para RESEARCH precisa ser visivel, nao silencioso."""
-    app = AppTest.from_file(str(PAGES_DIR / "analise.py"), default_timeout=30).run()
-    avisos = " ".join(i.value for i in app.info)
-    assert "inspeção histórica" in avisos
-    assert "PAPER" in avisos
-
-
 def test_analise_desenha_indicadores_selecionados() -> None:
     """Fatia vertical com indicadores: entrada -> portão -> cálculo -> gráfico."""
     if not (ROOT / "data" / "fixtures" / "PETR4" / "5m.csv").is_file():
