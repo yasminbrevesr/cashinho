@@ -14,6 +14,8 @@ from typing import Optional
 
 from ..models import BRT, Candle, Series
 from .base import DataError, Provider
+from .mercado import MarketDataProvider
+from .status import Capacidades
 from .cache import Cache
 
 _MAX_DIAS_INTRADAY = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59, "60m": 729, "1h": 729}
@@ -33,8 +35,16 @@ def sufixo_b3(symbol: str) -> str:
     return f"{s}.SA"
 
 
-class YahooProvider(Provider):
+class YahooProvider(MarketDataProvider):
     nome = "yahoo"
+    # o Yahoo publica candles intradiarios, mas com atraso tipico de ~15 min:
+    # da para pesquisa e backtest, nao para entrada em tempo real
+    capacidades = Capacidades(
+        candles_historicos=True,
+        timeframes=("1m", "2m", "5m", "15m", "30m", "60m", "1h", "1d"),
+        intradiario_1m=True,
+        atraso_tipico_s=15 * 60,
+    )
 
     def __init__(self, ttl_segundos: int = 45, cache: Optional[Cache] = None):
         try:

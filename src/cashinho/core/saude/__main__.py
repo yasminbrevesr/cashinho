@@ -110,9 +110,20 @@ def montar_monitor(args) -> MonitorDeSaude:
     risco = RiskManager(RiskConfig(capital=args.capital))
     config = ConfigSaude(limiares=LimiaresSaude(market_data_offline_min=args.atraso_offline))
 
+    from ...data.fabrica import montar_servico
+    from ...settings import carregar as carregar_config
+
+    try:
+        market_data = montar_servico(carregar_config())
+    except Exception:
+        # configuracao de provedor quebrada nao pode derrubar o painel que
+        # existe justamente para mostrar o que esta quebrado
+        market_data = None
+
     monitor = MonitorDeSaude(telemetria, config, modo=modo, risco=risco,
                              broker=broker, noticias=noticias,
-                             banco=args.diario if args.diario else None)
+                             banco=args.diario if args.diario else None,
+                             market_data=market_data)
     return monitor
 
 

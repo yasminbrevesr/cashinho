@@ -72,6 +72,7 @@ class MonitorDeSaude:
         broker=None,
         noticias=None,
         banco=None,
+        market_data=None,
         relogio: Optional[Callable[[], datetime]] = None,
     ):
         self.telemetria = telemetria or Telemetria()
@@ -79,17 +80,20 @@ class MonitorDeSaude:
         self.modo = modo
         self.risco = risco
         self.broker = broker
+        self.market_data = market_data
         self._relogio = relogio or (lambda: datetime.now(BRT))
         self.sondas: list[Sonda] = list(sondas) if sondas is not None else self._padrao(
-            risco=risco, broker=broker, noticias=noticias, banco=banco)
+            risco=risco, broker=broker, noticias=noticias, banco=banco,
+            market_data=market_data)
 
     # ------------------------------------------------------------------
-    def _padrao(self, risco=None, broker=None, noticias=None, banco=None) -> list[Sonda]:
+    def _padrao(self, risco=None, broker=None, noticias=None, banco=None,
+                market_data=None) -> list[Sonda]:
         """As sete sondas do painel, na ordem da tela."""
         lim = self.config.limiares
         t = self.telemetria
         return [
-            SondaMarketData(t, lim),
+            SondaMarketData(t, lim, servico=market_data),
             SondaBanco(banco, t, lim) if banco else
             SondaPorTelemetria("database", t, lim),
             SondaPorTelemetria("scanner", t, lim, opcional=True),
@@ -112,6 +116,7 @@ class MonitorDeSaude:
             kill_switch=kill_switch,
             ultima_analise=self.telemetria.ultimo_marco(MARCO_ANALISE),
             bloqueios=self._bloqueios(componentes, kill_switch),
+            market_data=self.market_data,
         )
 
     def permite_novas_operacoes(self, instante: Optional[datetime] = None) -> bool:

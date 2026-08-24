@@ -128,10 +128,13 @@ class SondaMarketData(Sonda):
 
     def __init__(self, telemetria=None, limiares=None,
                  ultimo_dado: Optional[Callable[[], Optional[datetime]]] = None,
-                 sessao: Optional[Sessao] = None):
+                 sessao: Optional[Sessao] = None, servico=None):
         super().__init__(telemetria, limiares)
         self._ultimo_dado = ultimo_dado
         self.sessao = sessao or Sessao()
+        # o MarketDataService, quando configurado: e' dele que sai qual
+        # provedor serve cada papel e se ha analise de tempo real
+        self.servico = servico
 
     def verificar(self, instante: datetime) -> Componente:
         ultimo = (self._ultimo_dado() if self._ultimo_dado
@@ -161,7 +164,17 @@ class SondaMarketData(Sonda):
 
         estado = _pior(estado, self._por_erros(erros),
                        self._por_latencia(self.telemetria.latencia_ms(self.chave)))
-        return self._componente(estado, detalhe, instante, ultimo)
+        return self._componente(estado, detalhe, instante, ultimo,
+                                modo=self._modo_dos_provedores())
+
+    def _modo_dos_provedores(self) -> str:
+        """Quem serve histórico, quem serve tempo real - ou a falta."""
+        if self.servico is None:
+            return ""
+        dados = self.servico.para_dict()
+        historico = (dados["historico"] or {}).get("nome", "nao configurado")
+        tempo_real = (dados["tempo_real"] or {}).get("nome", "NAO CONFIGURADO")
+        return f"historico {historico} · tempo real {tempo_real}"
 
     def _atraso_util(self, ultimo: datetime, instante: datetime) -> float:
         """Minutos de atraso, sem contar o tempo de mercado fechado.

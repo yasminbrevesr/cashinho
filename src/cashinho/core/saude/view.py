@@ -119,6 +119,12 @@ def pagina(saude: SaudeDoSistema, cores: bool = False) -> str:
                        ativo=cores))
     linhas.append(f"    ultima analise  {_hora(saude.ultima_analise, instante)}")
 
+    if getattr(saude, "market_data", None) is not None:
+        from ...data.view import secao_providers
+
+        linhas.append("")
+        linhas.append(secao_providers(saude.market_data, cores))
+
     linhas.append("")
     linhas.append(secao_erros(saude.erros, instante, cores=cores))
     linhas.append("")

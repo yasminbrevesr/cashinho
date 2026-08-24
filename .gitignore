@@ -8,3 +8,6 @@ build/
 dist/
 dados/*.csv
 .cashinho-cache/
+
+# credenciais locais
+.env

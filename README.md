@@ -96,6 +96,7 @@ Todas aceitam `--help`, quase todas aceitam `--json` e `--sem-cor`.
 | `python -m cashinho.core.diario` | diário de trades e estatística por setup, ativo, horário |
 | `python -m cashinho.core.validacao` | TRAIN/VALIDATION/TEST e walk-forward |
 | `python -m cashinho.core.log` | log estruturado do pregão |
+| `python -m cashinho.data` | market data: origem, status, idade e qualidade do dado |
 
 Exemplos que valem a pena:
 
@@ -109,23 +110,45 @@ python -m cashinho.core.scanner --semente 3 --atr-min 0.05 --boleta B3SA3
 
 ---
 
-## Dados reais
+## Dados: histórico e tempo real são coisas diferentes
 
-A fonte padrão é `demo` — **pregões sintéticos, não são preços reais**. Para
-dados de verdade:
+Uma pergunta separa as duas metades da camada de dados:
+
+> **Este dado serve para decidir uma entrada agora, ou para estudar o passado?**
+
+| | Historical Market Data | Realtime Market Data |
+|---|---|---|
+| serve para | backtest, pesquisa, validação, dashboard histórico | scanner intradiário, paper ao vivo, análise assistida |
+| tolera atraso | sim | **não** |
+| provedores hoje | `demo`, `csv`, `brapi`, `yahoo` | nenhum implementado |
+
+Um provedor **gratuito ou atrasado é ótimo para desenvolvimento e backtesting
+e imprestável para sinal de day trade**. O Cashinho sabe a diferença e recusa
+o segundo uso em vez de improvisar — não existe fallback silencioso de
+"realtime caiu, usa o atrasado".
 
 ```bash
-pip install yfinance
-python -m cashinho.core.scanner --fonte yahoo --ativos PETR4,VALE3,ITUB4
+cp .env.example .env        # e preencha
+python -m cashinho.data --providers
+python -m cashinho.data --ativo PETR4 --provider demo --timeframe 1d
 ```
 
-O Yahoo tem ~15 min de atraso: o robô trata isso como segunda opinião sobre o
-candle anterior, e o atraso aparece no System Health. Para dados sem atraso,
-implemente um `Provider` apontando para o feed da sua corretora
-(`src/cashinho/data/base.py`).
+A fonte padrão é `demo` — **pregões sintéticos, não são preços reais**.
+
+Para **brapi.dev**: crie um token em brapi.dev, preencha `BRAPI_TOKEN` no
+`.env` e declare os três campos do seu plano (`BRAPI_ATRASO_SEGUNDOS`,
+`BRAPI_TIMEFRAMES`, `BRAPI_REQUISICOES_POR_MINUTO`) lendo a documentação. O
+Cashinho **não adivinha característica de plano**: sem esses valores ele
+assume o pior caso e não libera análise de tempo real.
+
+Para **Yahoo**: `pip install yfinance` e `--fonte yahoo`. Tem ~15 min de
+atraso, declarado nas capacidades — serve para pesquisa, não para entrada.
 
 Também dá para usar CSV: `--fonte csv --pasta dados` com arquivos
 `PETR4-5m.csv` (`timestamp,open,high,low,close,volume`).
+
+Detalhes, estados do dado (`ONLINE`/`DELAYED`/`STALE`/`DEGRADED`/`OFFLINE`) e
+como adicionar um provedor novo: `src/cashinho/data/README.md`.
 
 ---
 

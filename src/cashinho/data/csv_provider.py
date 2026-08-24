@@ -19,6 +19,8 @@ from typing import Optional
 
 from ..models import BRT, Candle, Series
 from .base import DataError, Provider
+from .mercado import MarketDataProvider
+from .status import Capacidades
 
 _ALIAS = {
     "ts": {"ts", "data", "datahora", "datetime", "date", "time", "data_hora", "timestamp"},
@@ -82,8 +84,12 @@ def _para_float(txt: str) -> float:
     return float(t)
 
 
-class CSVProvider(Provider):
+class CSVProvider(MarketDataProvider):
     nome = "csv"
+    capacidades = Capacidades(
+        candles_historicos=True,
+        timeframes=("1m", "5m", "15m", "30m", "60m", "1d"),
+    )
 
     def __init__(self, pasta: str | Path):
         self.pasta = Path(pasta)

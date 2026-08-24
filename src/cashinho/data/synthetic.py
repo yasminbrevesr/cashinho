@@ -16,6 +16,8 @@ from typing import Optional
 from ..core.mtf.session import SESSAO_B3, Sessao
 from ..models import BRT, Candle, Series
 from .base import Provider, minutos_do_timeframe
+from .mercado import MarketDataProvider
+from .status import Capacidades
 
 REGIMES = {
     "alta": 0.00008,
@@ -24,10 +26,16 @@ REGIMES = {
 }
 
 
-class SyntheticProvider(Provider):
+class SyntheticProvider(MarketDataProvider):
     """Gera candles deterministicos para um ativo ficticio."""
 
     nome = "demo"
+    # dado sintetico exercita o sistema e nunca decide nada: nao declara
+    # tempo real, e nao ha atraso a declarar porque nao ha mercado por tras
+    capacidades = Capacidades(
+        candles_historicos=True,
+        timeframes=("1m", "5m", "15m", "30m", "60m", "1d"),
+    )
 
     def __init__(
         self,

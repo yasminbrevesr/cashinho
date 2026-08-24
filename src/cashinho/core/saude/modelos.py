@@ -72,6 +72,8 @@ class SaudeDoSistema:
     kill_switch: Optional[object] = None
     ultima_analise: Optional[datetime] = None
     bloqueios: tuple[str, ...] = ()   # por que operacoes novas estao barradas
+    # o MarketDataService, quando ha um: a tela mostra os dois papeis
+    market_data: Optional[object] = None
 
     # -- consultas ------------------------------------------------------
     def componente(self, chave: str) -> Optional[Componente]:
