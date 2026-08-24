@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
 from ...models import Direction, Series, formata_dinheiro
+from ..cache import CacheLimitado
 from ..confluencia import MultiTimeframeEngine
 from ..confluencia.estados import SetupState, TriggerState, Vies
 from ..confluencia.modelos import LeituraMultiTimeframe
@@ -78,6 +79,7 @@ class OpportunityEngine:
         config: Optional[ConfigOportunidade] = None,
         janela: int = 400,
         eventos=None,
+        cache_estrutura: int = 256,
     ):
         self.confluencia = confluencia or MultiTimeframeEngine()
         self.pesos = pesos or PESOS_PADRAO
@@ -86,7 +88,7 @@ class OpportunityEngine:
         # avaliador de noticias e eventos (opcional). Ele so sabe descontar
         # score, aumentar risco e bloquear - nunca aprovar
         self.eventos = eventos
-        self._cache_estrutura: dict = {}
+        self._cache_estrutura = CacheLimitado(teto=cache_estrutura)
 
     # ------------------------------------------------------------------
     def avaliar(self, vista, symbol: str = "") -> Opportunity:
@@ -180,9 +182,8 @@ class OpportunityEngine:
         # o symbol faz parte da chave: numa varredura, dois ativos tem o
         # mesmo timeframe, o mesmo ultimo candle e o mesmo tamanho de serie
         chave = (serie_setup.symbol, serie_setup.timeframe, serie_setup.last.ts, len(serie_setup))
-        if chave not in self._cache_estrutura:
-            self._cache_estrutura[chave] = analisar_estrutura(serie_setup, self.config.estrutura)
-        return self._cache_estrutura[chave]
+        return self._cache_estrutura.obter(
+            chave, lambda: analisar_estrutura(serie_setup, self.config.estrutura))
 
     def _timeframes(self) -> dict[str, str]:
         camadas = self.confluencia.config.camadas

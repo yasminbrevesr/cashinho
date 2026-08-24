@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Optional, Sequence
 
 from ...models import Direction, Series, formata_dinheiro
+from ..cache import CacheLimitado
 from ..mtf import MTFConfig, MTFEngine, MTFError
 from ..mtf.engine import MTFVista
 from .estados import PAPEIS_PADRAO, Vies
@@ -89,7 +90,7 @@ class MultiTimeframeEngine:
         self.regras = tuple(regras)
         self.cfg_leitura = leitura or ConfigLeitura()
         self.janela = janela
-        self._cache: dict = {}
+        self._cache = CacheLimitado(teto=512)
         self._validar_papeis()
 
     def _validar_papeis(self) -> None:
@@ -132,11 +133,11 @@ class MultiTimeframeEngine:
             # timestamp de fechamento (o caso normal numa varredura) leriam
             # a camada um do outro
             chave = (serie.symbol, papel, timeframe, fechado_em)
-            if chave not in self._cache:
-                # a leitura de uma camada so muda quando o candle DELA fecha:
-                # guardar por (papel, fechamento) evita recalcular a cada tick
-                self._cache[chave] = LEITORES[papel](serie, fechado_em, fechado_em, self.cfg_leitura)
-            base = self._cache[chave]
+            # a leitura de uma camada so muda quando o candle DELA fecha:
+            # guardar por (papel, fechamento) evita recalcular a cada tick
+            base = self._cache.obter(
+                chave,
+                lambda: LEITORES[papel](serie, fechado_em, fechado_em, self.cfg_leitura))
             camadas.append(
                 type(base)(
                     papel=base.papel, timeframe=base.timeframe, estado=base.estado,

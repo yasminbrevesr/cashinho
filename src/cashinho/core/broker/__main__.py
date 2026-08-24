@@ -33,6 +33,7 @@ from .modelos import Order, OrderType
 from .paper import ConfigPaper, PaperBroker
 from .risco import BrokerComRisco
 from .view import pagina, resumo
+from ..arquivos import escrever_json
 
 PASTA_PADRAO = Path.home() / ".cashinho"
 
@@ -88,14 +89,11 @@ def salvar(pasta: Path, broker) -> None:
     pasta.mkdir(parents=True, exist_ok=True)
     paper = broker_base(broker)
     com_risco = broker.broker if hasattr(broker, "diario") else broker
-    arq_paper.write_text(json.dumps(paper.para_dict(), indent=2, ensure_ascii=False))
+    escrever_json(arq_paper, paper.para_dict())
     com_risco.risco.config.salvar(arq_config)
-    arq_estado.write_text(json.dumps(com_risco.risco.estado.para_dict_completo(), indent=2,
-                                     ensure_ascii=False))
+    escrever_json(arq_estado, com_risco.risco.estado.para_dict_completo())
     if hasattr(broker, "contextos_para_dict"):
-        _arquivo_contextos(pasta).write_text(
-            json.dumps(broker.contextos_para_dict(), indent=2, ensure_ascii=False)
-        )
+        escrever_json(_arquivo_contextos(pasta), broker.contextos_para_dict())
 
 
 def _tipo(texto: str) -> OrderType:

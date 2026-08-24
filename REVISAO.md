@@ -82,6 +82,18 @@ registrado em teste (`tests/indicators/test_volume.py`).
 
 ---
 
+## Situacao dos importantes (fase seguinte)
+
+Os quatro primeiros da recomendacao foram executados depois desta revisao:
+
+| # | item | situacao |
+|---|---|---|
+| 1 | logs ausentes | **feito** - `core/log`, JSONL por pregao, ligado a Telemetria e a 4 componentes |
+| 2 | duplicacao das views | **feito** - `core/ui`, -268 linhas, sem mudar uma saida |
+| 9 | caches sem limite | **feito** - `CacheLimitado` (LRU): 33 MB -> 15,6 MB em 900 avaliacoes (-53%) |
+| 8 | escrita nao atomica | **feito** - `core/arquivos`, temporario + `os.replace` + fsync |
+| 3,4,5,6,7,10,11,12 | demais | pendentes, sem alteracao |
+
 ## Melhorias futuras
 
 1. **Log estruturado** (JSONL, como o diario) com nivel por componente,

@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from ..arquivos import escrever_json
 
 
 class ConfiguracaoInvalidaError(ValueError):
@@ -126,7 +127,7 @@ class RiskConfig:
     def salvar(self, caminho: str | Path) -> Path:
         destino = Path(caminho)
         destino.parent.mkdir(parents=True, exist_ok=True)
-        destino.write_text(json.dumps(self.para_dict(), indent=2, ensure_ascii=False))
+        escrever_json(destino, self.para_dict())
         return destino
 
     @classmethod

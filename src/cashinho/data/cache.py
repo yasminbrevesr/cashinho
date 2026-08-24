@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from ..core.arquivos import escrever_json
 from ..models import BRT, Candle, Series
 
 from datetime import datetime
@@ -55,7 +56,9 @@ class Cache:
             ],
         }
         try:
-            self._arquivo(chave).write_text(json.dumps(dados))
+            # atomico sem fsync: cache pela metade confundiria a proxima
+            # leitura, mas cache perdido num desligamento so custa rebuscar
+            escrever_json(self._arquivo(chave), dados, indent=None, fsync=False)
         except OSError:
             pass
 

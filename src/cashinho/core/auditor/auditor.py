@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Sequence
 
+from ..cache import CacheLimitado
 from ...models import BRT
 from ..oportunidade.estados import EstadoOportunidade
 from ..oportunidade.modelos import Opportunity
@@ -36,7 +37,7 @@ class ContrarianAuditor:
         self.checagens = tuple(checagens)
         self.score_minimo = score_minimo_pos_auditoria
         self.cfg_estrutura = estrutura or EstruturaConfig()
-        self._cache_estrutura: dict = {}
+        self._cache_estrutura = CacheLimitado(teto=256)
 
     # ------------------------------------------------------------------
     def auditar(
@@ -75,9 +76,8 @@ class ContrarianAuditor:
 
     def _estrutura(self, serie):
         chave = (serie.symbol, serie.timeframe, serie.last.ts, len(serie))
-        if chave not in self._cache_estrutura:
-            self._cache_estrutura[chave] = analisar_estrutura(serie, self.cfg_estrutura)
-        return self._cache_estrutura[chave]
+        return self._cache_estrutura.obter(
+            chave, lambda: analisar_estrutura(serie, self.cfg_estrutura))
 
     # ------------------------------------------------------------------
     def _veredito(self, op: Opportunity, checagens: tuple[Checagem, ...]) -> AuditResult:

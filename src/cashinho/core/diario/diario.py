@@ -10,6 +10,7 @@ from typing import Iterable, Optional, Sequence
 
 from ...models import BRT
 from .estatisticas import Estatistica, calcular, todos_os_agrupamentos
+from ..arquivos import escrever_texto
 from .modelos import Filtro, Registro
 
 
@@ -70,12 +71,17 @@ class DiarioDeTrades:
     # persistencia
     # ------------------------------------------------------------------
     def salvar(self, caminho: str | Path) -> Path:
-        destino = Path(caminho)
-        destino.parent.mkdir(parents=True, exist_ok=True)
-        with destino.open("w", encoding="utf-8") as fh:
-            for r in self._registros:
-                fh.write(json.dumps(r.para_dict(), ensure_ascii=False) + "\n")
-        return destino
+        """Reescreve o arquivo inteiro - de forma atomica.
+
+        O caminho normal e' ``anexar`` (append-only). Este aqui reescreve
+        tudo, e reescrever com o arquivo aberto em ``w`` deixaria o diario
+        truncado se o processo morresse no meio.
+        """
+        conteudo = "".join(
+            json.dumps(r.para_dict(), ensure_ascii=False) + "\n"
+            for r in self._registros
+        )
+        return escrever_texto(caminho, conteudo)
 
     def anexar(self, caminho: str | Path, registro: Registro) -> Path:
         """Acrescenta uma linha sem reescrever o arquivo inteiro."""

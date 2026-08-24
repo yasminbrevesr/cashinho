@@ -24,6 +24,7 @@ from .models import PedidoOperacao, RiskRejectionError
 from .state import RiskState
 from .view import decisao as ver_decisao
 from .view import pagina
+from ..arquivos import escrever_json
 
 PASTA_PADRAO = Path.home() / ".cashinho"
 
@@ -47,7 +48,7 @@ def salvar(pasta: Path, rm: RiskManager) -> None:
     arq_config, arq_estado = _caminhos(pasta)
     rm.config.salvar(arq_config)
     arq_estado.parent.mkdir(parents=True, exist_ok=True)
-    arq_estado.write_text(json.dumps(rm.estado.para_dict_completo(), indent=2, ensure_ascii=False))
+    escrever_json(arq_estado, rm.estado.para_dict_completo())
 
 
 def _direcao(texto: str) -> Direction:
