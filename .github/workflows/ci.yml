@@ -22,7 +22,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest pytest-cov ruff "mypy<2" pandas-stubs
+          pip install "numpy<2.5" pytest pytest-cov ruff "mypy<2" pandas-stubs
       - name: Lint
         run: ruff check .
       - name: Tipos
