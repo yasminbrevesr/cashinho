@@ -234,6 +234,36 @@ class Quote(DomainModel):
     bid: Price | None = None
     ask: Price | None = None
 
+    bid_ask_time: UtcDatetime | None = None
+    """Instante do ultimo evento de COTACAO (bid/ask).
+
+    Separado de `trade_time` por evidencia do terminal real: cotacao e
+    negocio chegam em instantes diferentes (17:32:41.596 e 17:32:41.601 no
+    teste com PETR4). Um campo unico esconderia qual dos dois esta velho.
+    """
+
+    trade_time: UtcDatetime | None = None
+    """Instante do ultimo NEGOCIO fechado."""
+
+    trade_volume: int | None = Field(default=None, ge=0)
+    """Volume do ultimo negocio, quando a fonte informa."""
+
     def age_seconds(self, clock: Clock) -> float:
         """Idade da cotacao em relacao ao instante logico do sistema."""
         return (clock.now() - self.timestamp).total_seconds()
+
+    @property
+    def has_active_book(self) -> bool:
+        """Ha livro com os dois lados agora?
+
+        `bid` e `ask` sao `None` quando a fonte devolve zero - o que e
+        ausencia de livro, nao preco zero.
+        """
+        return self.bid is not None and self.ask is not None
+
+    @property
+    def spread(self) -> Price | None:
+        """Diferenca entre ask e bid, apenas quando ha os dois lados."""
+        if self.bid is None or self.ask is None:
+            return None
+        return self.ask - self.bid

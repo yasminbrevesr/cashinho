@@ -7,15 +7,20 @@ from datetime import UTC
 import streamlit as st
 
 from app.components.chrome import page_header, sidebar
+from app.components.feed import render_feed_status
 from cashinho.adapters.persistence.session import (
     create_db_engine,
     init_db,
     resolve_database_url,
 )
+from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.b3_calendar import B3Calendar
 from cashinho.core.time.clocks import SystemClock
 from cashinho.version import __version__
+
+MONITORED_SYMBOL = "PETR4"
+"""Ativo usado para verificar o feed. Primeiro papel integrado ao MT5."""
 
 settings = get_settings()
 sidebar(settings)
@@ -53,14 +58,12 @@ except Exception as exc:  # a tela deve mostrar a falha, nao quebrar
     st.error(f"Falha ao conectar: {exc}", icon="⛔")
 
 st.subheader("Dados de mercado")
-st.error(
-    "Nenhum provider de dados configurado. Nenhuma cotacao pode ser exibida. "
-    "ANALISE BLOQUEADA.",
-    icon="⛔",
-)
+choice = build_market_data_provider(settings, clock)
+st.write(f"Provider ativo: `{choice.provider.capabilities.name}` — {choice.reason}")
+render_feed_status(choice, MONITORED_SYMBOL, settings.display_timezone)
 st.caption(
     "O Cashinho nao inventa cotacoes e nao apresenta preco antigo como atual. "
-    "Sem provider verificado, a analise permanece bloqueada."
+    "Fonte sem tempo real nao habilita decisao ao vivo."
 )
 
 st.caption(f"Fuso interno: UTC · exibicao: {settings.display_timezone} · agora {now.astimezone(UTC).isoformat()}")

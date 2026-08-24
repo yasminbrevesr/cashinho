@@ -22,6 +22,12 @@ dependencies = [
     "tzdata>=2024.2",
 ]
 
+[project.optional-dependencies]
+# A biblioteca MetaTrader5 so existe no Windows. O marker impede que a
+# instalacao quebre em Linux e na CI, e o codigo nunca a importa no nivel de
+# modulo - o resto do projeto roda sem ela.
+metatrader = ["MetaTrader5>=5.0.45; platform_system == 'Windows'"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

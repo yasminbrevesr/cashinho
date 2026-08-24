@@ -54,6 +54,27 @@ class Settings(BaseSettings):
     display_timezone: str = "America/Sao_Paulo"
     capital: Decimal = Decimal("100000.00")
 
+    # --- MetaTrader 5 (somente Market Data) -------------------------------
+    # Nenhuma credencial da corretora aqui, e nao deve haver (regra 7): quem
+    # autentica e o operador, no proprio terminal.
+    mt5_enabled: bool = False
+    mt5_terminal_path: str = ""
+    """Caminho do terminal. Vazio deixa o MT5 localizar sozinho; preencher
+    so quando houver mais de um MetaTrader instalado na maquina."""
+
+    mt5_server_timezone: str = "America/Sao_Paulo"
+    """Fuso em que o servidor da corretora marca as horas.
+
+    E o que impede o deslocamento de tres horas: o inteiro devolvido pelo MT5
+    e relogio de parede do servidor, nao epoch UTC.
+    """
+
+    mt5_stale_seconds: int = Field(default=60, ge=1)
+    """Segundos sem tick novo, com o mercado aberto, para o feed virar STALE."""
+
+    mt5_refresh_seconds: int = Field(default=5, ge=1)
+    """Intervalo de atualizacao das telas em tempo real."""
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, value: str) -> str:

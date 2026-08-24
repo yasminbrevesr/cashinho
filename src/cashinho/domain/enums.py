@@ -140,6 +140,43 @@ class DataStatus(StrEnum):
         return self is not DataStatus.BLOCKED
 
 
+class FeedStatus(StrEnum):
+    """Estado de uma fonte de dados ao vivo.
+
+    Distinto de `DataStatus`, que e o veredito do portao de qualidade sobre
+    uma serie ja carregada: aqui o assunto e a **liveness do feed**.
+
+    A separacao entre `MARKET_CLOSED` e `STALE` veio do terminal real: as 20h
+    o ultimo tick e das 17h55 e isso esta correto, enquanto o mesmo atraso as
+    14h significa que a fonte parou. Tratar os dois como um estado so faria o
+    sistema gritar todo fim de tarde e calar quando importasse.
+
+    `NO_ACTIVE_BOOK` idem: o MT5 devolve `bid=0.0` e `ask=0.0` no fim do
+    pregao. Isso e ausencia de livro, nao preco zero.
+    """
+
+    ONLINE = "ONLINE"
+    STALE = "STALE"
+    MARKET_CLOSED = "MARKET_CLOSED"
+    NO_ACTIVE_BOOK = "NO_ACTIVE_BOOK"
+    OFFLINE = "OFFLINE"
+
+    @property
+    def has_data(self) -> bool:
+        """Chegou numero? OFFLINE e o unico que nao trouxe nada."""
+        return self is not FeedStatus.OFFLINE
+
+    @property
+    def allows_live_decision(self) -> bool:
+        """So ONLINE sustenta decisao ao vivo."""
+        return self is FeedStatus.ONLINE
+
+    @property
+    def market_is_idle(self) -> bool:
+        """O dado nao muda porque nao ha o que mudar - nao e defeito."""
+        return self in (FeedStatus.MARKET_CLOSED, FeedStatus.NO_ACTIVE_BOOK)
+
+
 class Severity(StrEnum):
     """Gravidade de um problema de qualidade de dados."""
 

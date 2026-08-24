@@ -13,14 +13,16 @@ import streamlit as st
 
 from app.components.charts import candlestick_figure
 from app.components.chrome import page_header, sidebar
+from app.components.feed import render_feed_status, render_source_banner
 from app.components.quality import quality_panel
 from cashinho.adapters.providers.csv_provider import (
-    CsvHistoricalProvider,
     ProviderError,
 )
+from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.clocks import SystemClock
 from cashinho.domain.enums import Mode
+from cashinho.domain.errors import CashinhoError
 from cashinho.pipeline.indicators import IndicatorSelection, compute_panel
 from cashinho.pipeline.market_data import load_market_data
 
@@ -43,9 +45,10 @@ page_header("Análise", "Carga de candles, verificação de qualidade e visualiz
 
 FIXTURES = settings.data_dir / "fixtures"
 clock = SystemClock()
-provider = CsvHistoricalProvider(FIXTURES, clock, name="csv-fixtures")
+choice = build_market_data_provider(settings, clock, fixtures_root=FIXTURES)
+provider = choice.provider
 
-symbols = provider.list_symbols()
+symbols = choice.offered_symbols()
 if not symbols:
     st.error(
         "Nenhum dado disponível. Gere as séries de desenvolvimento com:\n\n"
@@ -54,13 +57,9 @@ if not symbols:
     )
     st.stop()
 
-st.warning(
-    "Fonte ativa: **arquivos CSV locais**. As séries de desenvolvimento são "
-    "**sintéticas** e não correspondem a preços reais negociados na B3.",
-    icon="⚠️",
-)
+render_source_banner(choice)
 
-if settings.mode.requires_realtime_data:
+if settings.mode.requires_realtime_data and not choice.realtime:
     st.info(
         f"Modo operacional: **{settings.mode.value}**. Esta tela executa "
         f"**inspeção histórica** (`{INSPECTION_MODE.value}`), porque a fonte atual "
@@ -74,7 +73,21 @@ col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1])
 with col1:
     symbol = st.selectbox("Ativo", options=symbols, index=0)
 
-available = provider.get_available_timeframes(symbol)
+if choice.is_metatrader:
+    st.divider()
+    st.subheader("Dados em tempo real")
+    render_feed_status(choice, symbol, settings.display_timezone)
+    st.divider()
+
+try:
+    available = provider.get_available_timeframes(symbol)
+except CashinhoError as exc:
+    # Feed indisponivel nao pode derrubar a tela: o estado ja apareceu acima,
+    # e a pagina precisa continuar legivel para o operador entender o que
+    # fazer. Cair para dado historico aqui seria o fallback silencioso que a
+    # regra 5 proibe.
+    st.error(f"Sem timeframes disponiveis para {symbol}: {exc}", icon="⛔")
+    st.stop()
 with col2:
     timeframe = st.selectbox(
         "Timeframe",
