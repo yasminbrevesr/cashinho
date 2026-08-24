@@ -27,12 +27,12 @@ def provider(corpo=None, registro=None, config=None, agora=AGORA, **campos):
 # --- requisicao ------------------------------------------------------------
 
 
-def test_usa_a_url_base_e_o_endpoint_de_quote():
+def test_a_cotacao_usa_o_endpoint_v2():
     registro = []
     provider(registro=registro).cotacao("PETR4")
 
     url, _ = registro[0]
-    assert url.startswith("https://brapi.dev/api/quote/PETR4")
+    assert url == "https://brapi.dev/api/v2/stocks/quote?symbols=PETR4"
 
 
 def test_manda_o_token_no_cabecalho_e_nunca_na_url():
@@ -51,7 +51,7 @@ def test_sem_token_nao_manda_cabecalho_de_autorizacao():
     assert "Authorization" not in registro[0][1]
 
 
-def test_o_historico_manda_range_e_interval():
+def test_o_historico_continua_no_endpoint_de_quote_com_range():
     registro = []
     provider(registro=registro).candles("PETR4", "1d", 30)
 
@@ -237,10 +237,7 @@ def test_nao_repete_erro_definitivo():
     assert len(tentativas) == 1
 
 
-def test_erro_recuperavel_e_repetido_ate_o_limite(monkeypatch):
-    import time
-
-    monkeypatch.setattr(time, "sleep", lambda s: None)
+def test_erro_recuperavel_e_repetido_ate_o_limite():
     tentativas = []
 
     def abrir(url, cabecalhos):
@@ -249,7 +246,8 @@ def test_erro_recuperavel_e_repetido_ate_o_limite(monkeypatch):
         erro.recuperavel = True
         raise erro
 
-    p = BrapiMarketDataProvider(config_brapi(), abrir=abrir, relogio=lambda: AGORA)
+    p = BrapiMarketDataProvider(config_brapi(), abrir=abrir, relogio=lambda: AGORA,
+                                dormir=lambda s: None)
     with pytest.raises(BrapiError):
         p.cotacao("PETR4")
 
@@ -265,3 +263,182 @@ def test_sem_token_a_lista_de_ativos_e_a_de_teste():
 
 def test_com_token_o_provedor_nao_afirma_uma_lista():
     assert provider().simbolos() == ()
+
+
+# ---------------------------------------------------------------------------
+# endpoint v2: GET /api/v2/stocks/quote?symbols=... -> results[0].data
+# ---------------------------------------------------------------------------
+
+
+from .factories import resposta_v2   # noqa: E402
+
+
+def v2(corpo=None, registro=None, codigo: int = 200, **campos):
+    from cashinho.data.brapi import BrapiMarketDataProvider
+
+    return BrapiMarketDataProvider(
+        config_brapi(**campos),
+        abrir=abridor(corpo if corpo is not None else resposta_v2(), registro, codigo),
+        relogio=lambda: AGORA,
+        dormir=lambda s: None,   # retentativa sem espera de verdade
+    )
+
+
+def test_a_url_e_exatamente_a_do_contrato():
+    registro = []
+    v2(registro=registro).buscar_cotacao("B3SA3")
+
+    url, _ = registro[0]
+    assert url == "https://brapi.dev/api/v2/stocks/quote?symbols=B3SA3"
+
+
+def test_o_simbolo_e_normalizado_para_maiusculo():
+    registro = []
+    v2(registro=registro).buscar_cotacao("b3sa3")
+
+    assert "symbols=B3SA3" in registro[0][0]
+
+
+def test_devolve_o_conteudo_de_results_zero_data():
+    """A v2 aninha os campos em data; a funcao entrega o payload de dentro."""
+    dados = v2().buscar_cotacao("PETR4")
+
+    assert dados["symbol"] == "PETR4"
+    assert dados["regularMarketPrice"] == 38.42
+    assert "data" not in dados        # ja veio desembrulhado
+
+
+def test_a_rota_antiga_sem_data_continua_funcionando():
+    """results[0] direto, sem 'data': aceito, para uma troca de rota nao
+    virar campo faltando la na frente."""
+    dados = v2(resposta_brapi()).buscar_cotacao("PETR4")
+
+    assert dados["regularMarketPrice"] == 38.42
+
+
+def test_a_cotacao_normalizada_sai_do_payload_da_v2():
+    cot = v2().cotacao("PETR4")
+
+    assert cot.last == 38.42
+    assert cot.source == "brapi"
+    assert cot.status is StatusDados.DELAYED
+
+
+def test_o_token_vai_no_cabecalho_e_nunca_na_url_da_v2():
+    registro = []
+    v2(registro=registro).buscar_cotacao("PETR4")
+
+    url, cabecalhos = registro[0]
+    assert cabecalhos["Authorization"] == "Bearer token-de-teste"
+    assert "token" not in url.lower()
+
+
+# --- respostas nao-2xx ------------------------------------------------------
+
+
+@pytest.mark.parametrize("codigo,trecho", [
+    (400, "HTTP 400"),
+    (401, "credencial"),
+    (403, "credencial"),
+    (404, "nao encontrado"),
+    (429, "limite de requisicoes"),
+    (500, "erro interno"),
+    (503, "erro interno"),
+])
+def test_resposta_nao_2xx_vira_erro_explicado(codigo, trecho):
+    with pytest.raises(BrapiError, match=trecho):
+        v2(json.dumps({"message": "ops"}), codigo=codigo).buscar_cotacao("PETR4")
+
+
+def test_o_erro_carrega_a_explicacao_da_propria_api():
+    with pytest.raises(BrapiError, match="token invalido"):
+        v2(json.dumps({"message": "token invalido"}), codigo=401).buscar_cotacao("PETR4")
+
+
+def test_corpo_de_erro_que_nao_e_json_ainda_aparece():
+    with pytest.raises(BrapiError, match="manutencao"):
+        v2("<html>manutencao</html>", codigo=500).buscar_cotacao("PETR4")
+
+
+def test_401_diz_onde_conferir_o_token():
+    with pytest.raises(BrapiError, match="BRAPI_TOKEN no .env"):
+        v2("{}", codigo=401).buscar_cotacao("PETR4")
+
+
+def test_429_aponta_a_configuracao_do_freio():
+    with pytest.raises(BrapiError, match="BRAPI_REQUISICOES_POR_MINUTO"):
+        v2("{}", codigo=429).buscar_cotacao("PETR4")
+
+
+def test_2xx_diferente_de_200_e_aceito():
+    p = v2(resposta_v2(), codigo=204)
+    # 204 sem corpo valido cai no erro de JSON, nao no de status
+    with pytest.raises(BrapiError):
+        v2("", codigo=204).buscar_cotacao("PETR4")
+    assert p.buscar_cotacao("PETR4")["symbol"] == "PETR4"
+
+
+# --- respostas 2xx malformadas ------------------------------------------------
+
+
+def test_results_vazio_vira_erro():
+    with pytest.raises(BrapiError, match="sem resultado"):
+        v2(json.dumps({"results": []})).buscar_cotacao("PETR4")
+
+
+def test_sem_a_chave_results_vira_erro():
+    with pytest.raises(BrapiError, match="sem resultado"):
+        v2(json.dumps({"erro": "nada"})).buscar_cotacao("PETR4")
+
+
+def test_results_zero_em_formato_inesperado_vira_erro():
+    with pytest.raises(BrapiError, match="formato inesperado"):
+        v2(json.dumps({"results": ["so um texto"]})).buscar_cotacao("PETR4")
+
+
+def test_corpo_2xx_que_nao_e_json_vira_erro():
+    with pytest.raises(BrapiError, match="nao e' JSON"):
+        v2("<html>").buscar_cotacao("PETR4")
+
+
+# ---------------------------------------------------------------------------
+# a credencial nao vaza
+# ---------------------------------------------------------------------------
+
+
+def test_o_token_nunca_aparece_no_payload_da_configuracao():
+    """para_dict vai para tela, JSON e log: token ali seria vazamento."""
+    from cashinho.settings import ConfigMarketData
+
+    cfg = ConfigMarketData(brapi_token="segredo-que-nao-pode-vazar")
+
+    assert "segredo" not in json.dumps(cfg.para_dict())
+    assert cfg.para_dict()["brapi_autenticado"] is True
+
+
+def test_o_token_nunca_aparece_no_payload_do_provedor():
+    p = v2(brapi_token="segredo-que-nao-pode-vazar")
+
+    assert "segredo" not in json.dumps(p.para_dict())
+
+
+def test_o_token_nao_entra_na_mensagem_de_erro():
+    p = v2(json.dumps({"message": "sem permissao"}), codigo=401,
+           brapi_token="segredo-que-nao-pode-vazar")
+
+    with pytest.raises(BrapiError) as e:
+        p.buscar_cotacao("PETR4")
+    assert "segredo" not in str(e.value)
+
+
+def test_a_chave_de_verdade_nao_esta_versionada():
+    """O .env fica de fora do repositorio; so o .env.example e' versionado."""
+    import pathlib
+    import subprocess
+
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    rastreados = subprocess.run(
+        ["git", "ls-files"], cwd=raiz, capture_output=True, text=True).stdout.split()
+
+    assert ".env" not in rastreados
+    assert ".env.example" in rastreados

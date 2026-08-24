@@ -89,8 +89,25 @@ rede bloqueia o domínio). O que está no código veio de páginas da própria
 brapi obtidas por busca, e está separado assim:
 
 **Confirmado** — base `https://brapi.dev/api`, autenticação
-`Authorization: Bearer <token>`, endpoint `/quote/{tickers}`, parâmetros
-`range` e `interval`, alguns ativos respondendo sem token.
+`Authorization: Bearer <token>`, endpoint `/quote/{tickers}` com `range` e
+`interval`, alguns ativos respondendo sem token.
+
+**Rota de cotação (v2), informada pelo dono do projeto:**
+
+```
+GET https://brapi.dev/api/v2/stocks/quote?symbols=B3SA3
+        ↓
+results[0].data      ← os campos da cotação vêm aninhados aqui
+```
+
+`BrapiMarketDataProvider.buscar_cotacao(symbol)` é a função tipada dessa rota:
+devolve o dicionário de `results[0].data` já desembrulhado, com não-2xx
+tratado (401/403 apontam o `BRAPI_TOKEN`, 429 aponta o freio, 5xx e timeout
+são retentados, o resto não). `cotacao(symbol)` normaliza isso no modelo
+`Cotacao` do projeto.
+
+A rota antiga (`results[0]` sem `data`) continua sendo aceita: uma troca de
+rota não pode virar campo faltando lá na frente.
 
 **Não confirmado — por isso é configuração, não constante:**
 

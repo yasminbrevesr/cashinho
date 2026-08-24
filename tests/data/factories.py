@@ -91,10 +91,21 @@ def resposta_brapi(historico: int = 5, momento: Optional[datetime] = None,
     return json.dumps({"results": [resultado]})
 
 
-def abridor(corpo: str, registro: Optional[list] = None):
-    """Simula a chamada HTTP, guardando as URLs pedidas."""
-    def abrir(url: str, cabecalhos: Mapping[str, str]) -> str:
+def abridor(corpo: str, registro: Optional[list] = None, codigo: int = 200):
+    """Simula a chamada HTTP, guardando as URLs pedidas.
+
+    Devolve o par ``(codigo, corpo)`` - o mesmo que o urllib produz -, para os
+    testes exercitarem 401, 404, 429 e 500 pelo caminho de codigo real.
+    """
+    def abrir(url: str, cabecalhos: Mapping[str, str]) -> tuple[int, str]:
         if registro is not None:
             registro.append((url, dict(cabecalhos)))
-        return corpo
+        return codigo, corpo
     return abrir
+
+
+def resposta_v2(historico: int = 5, momento: Optional[datetime] = None,
+                **campos) -> str:
+    """A forma da v2: os campos aninhados em ``results[0].data``."""
+    interno = json.loads(resposta_brapi(historico, momento, **campos))
+    return json.dumps({"results": [{"data": interno["results"][0]}]})

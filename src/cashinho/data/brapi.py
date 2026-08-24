@@ -69,6 +69,9 @@ CAMPOS_CANDLE: dict[str, tuple[str, ...]] = {
     "volume": ("volume",),
 }
 
+# rota de cotacao da v2: os campos vem em results[0].data
+ROTA_COTACAO = "/v2/stocks/quote"
+
 TENTATIVAS = 3
 ESPERA_INICIAL_S = 1.0
 
@@ -111,9 +114,14 @@ class BrapiMarketDataProvider(MarketDataProvider):
     nome = NOME
 
     def __init__(self, config: Optional[ConfigMarketData] = None,
-                 abrir=None, relogio=None, timeout: float = 10.0):
+                 abrir=None, relogio=None, timeout: float = 10.0, dormir=None):
+        import time as _time
+
         self.config = config or carregar()
         self.timeout = timeout
+        # injetavel como no Freio: teste de retentativa nao pode custar
+        # segundos de espera de verdade
+        self._dormir = dormir or _time.sleep
         self._abrir = abrir            # injetavel nos testes; None = urllib
         self._relogio = relogio or (lambda: datetime.now(BRT))
         self.freio = Freio(self.config.brapi_requisicoes_por_minuto)
@@ -159,7 +167,8 @@ class BrapiMarketDataProvider(MarketDataProvider):
         return Series(symbol.upper(), timeframe, candles)
 
     def cotacao(self, symbol: str) -> Cotacao:
-        bruto = self._buscar(symbol, {})
+        """A cotacao ja normalizada no modelo padrao do Cashinho."""
+        bruto = self.buscar_cotacao(symbol)
         agora = self._relogio()
         momento = _momento(_campo(bruto, "momento")) or agora
         idade = max((agora - momento).total_seconds(), 0.0)
@@ -241,18 +250,44 @@ class BrapiMarketDataProvider(MarketDataProvider):
 
     # ------------------------------------------------------------------
     def _buscar(self, symbol: str, params: Mapping[str, str]) -> Mapping[str, Any]:
+        """Historico pelo endpoint de quote, com range/interval."""
         alvo = f"{self.config.brapi_base_url}/quote/{urllib.parse.quote(symbol.upper())}"
         consulta = {k: v for k, v in params.items() if v}
         url = f"{alvo}?{urllib.parse.urlencode(consulta)}" if consulta else alvo
+        return self._primeiro_resultado(self._requisitar(url), symbol)
 
-        dados = self._requisitar(url)
+    def _primeiro_resultado(self, dados: Any, symbol: str) -> Mapping[str, Any]:
+        """``results[0]`` - desembrulhando ``data`` quando a v2 o traz.
+
+        A v2 aninha a cotacao em ``results[0].data``; a rota antiga devolve os
+        campos direto em ``results[0]``. Aceitar as duas formas evita que uma
+        mudanca de rota vire campo faltando la na frente.
+        """
         resultados = dados.get("results") if isinstance(dados, dict) else None
         if not resultados:
-            erro = (dados.get("message") or dados.get("error")
-                    if isinstance(dados, dict) else None)
+            erro = _mensagem_da_api(json.dumps(dados)) if isinstance(dados, dict) else ""
             raise BrapiError(f"brapi sem resultado para {symbol}"
                              + (f": {erro}" if erro else ""))
-        return resultados[0]
+
+        primeiro = resultados[0]
+        if not isinstance(primeiro, dict):
+            raise BrapiError(f"brapi devolveu results[0] em formato inesperado "
+                             f"({type(primeiro).__name__}) para {symbol}")
+
+        aninhado = primeiro.get("data")
+        return aninhado if isinstance(aninhado, dict) else primeiro
+
+    def buscar_cotacao(self, symbol: str) -> Mapping[str, Any]:
+        """``GET /v2/stocks/quote?symbols=...`` -> o payload de ``results[0].data``.
+
+        Devolve o dicionario cru da API, ja desembrulhado e com os erros
+        tratados: nao-2xx vira :class:`BrapiError` com o motivo, e resposta sem
+        resultado tambem. Quem quiser o modelo padronizado do Cashinho usa
+        :meth:`cotacao`, que normaliza isto em :class:`Cotacao`.
+        """
+        alvo = f"{self.config.brapi_base_url}{ROTA_COTACAO}"
+        url = f"{alvo}?{urllib.parse.urlencode({'symbols': symbol.upper()})}"
+        return self._primeiro_resultado(self._requisitar(url), symbol)
 
     def _requisitar(self, url: str) -> Mapping[str, Any]:
         """Uma requisicao, com freio, timeout e retentativa so onde cabe."""
@@ -268,26 +303,32 @@ class BrapiMarketDataProvider(MarketDataProvider):
                 self.ultimo_erro = ultimo
                 if not getattr(e, "recuperavel", False) or tentativa == TENTATIVAS:
                     raise
-                import time as _t
-
-                _t.sleep(espera)
+                self._dormir(espera)
                 espera *= 2
         raise BrapiError(ultimo or "falha desconhecida na brapi")
 
     def _ler(self, url: str) -> Mapping[str, Any]:
+        """Uma chamada HTTP: devolve o JSON ou levanta com o motivo.
+
+        O abridor injetado devolve ``(codigo, corpo)`` - o mesmo par que o
+        urllib produz. E' o que permite testar 401, 404, 429 e 500 pelo mesmo
+        caminho de codigo que a rede usa, em vez de por um atalho.
+        """
         cabecalhos = {"Accept": "application/json", "User-Agent": "cashinho"}
         if self.config.brapi_autenticado:
+            # o token vai no cabecalho, nunca na URL: URL entra em log de
+            # proxy, em historico de shell e em mensagem de erro
             cabecalhos["Authorization"] = f"Bearer {self.config.brapi_token}"
 
         try:
             if self._abrir is not None:
-                corpo = self._abrir(url, cabecalhos)
+                codigo, corpo = self._abrir(url, cabecalhos)
             else:  # pragma: no cover - depende de rede
                 requisicao = urllib.request.Request(url, headers=cabecalhos)
                 with urllib.request.urlopen(requisicao, timeout=self.timeout) as r:
-                    corpo = r.read().decode("utf-8")
+                    codigo, corpo = r.status, r.read().decode("utf-8")
         except urllib.error.HTTPError as e:  # pragma: no cover - depende de rede
-            raise self._erro_http(e.code) from e
+            raise self._erro_http(e.code, _corpo_do_erro(e)) from e
         except urllib.error.URLError as e:  # pragma: no cover - depende de rede
             erro = BrapiError(f"brapi inacessivel: {e.reason}")
             erro.recuperavel = True  # type: ignore[attr-defined]
@@ -297,26 +338,36 @@ class BrapiMarketDataProvider(MarketDataProvider):
             erro.recuperavel = True  # type: ignore[attr-defined]
             raise erro from e
 
+        if not 200 <= int(codigo) < 300:
+            raise self._erro_http(int(codigo), corpo)
+
         try:
             return json.loads(corpo)
         except ValueError as e:
             raise BrapiError("brapi devolveu resposta que nao e' JSON") from e
 
-    def _erro_http(self, codigo: int) -> BrapiError:
+    def _erro_http(self, codigo: int, corpo: str = "") -> BrapiError:
+        """Traduz o status HTTP - e diz o que fazer, quando da para dizer."""
+        detalhe = _mensagem_da_api(corpo)
+        sufixo = f": {detalhe}" if detalhe else ""
+
         if codigo in (401, 403):
             return BrapiError(
-                f"brapi recusou a credencial (HTTP {codigo}): confira BRAPI_TOKEN")
+                f"brapi recusou a credencial (HTTP {codigo}){sufixo}. "
+                "Confira BRAPI_TOKEN no .env")
         if codigo == 404:
-            return BrapiError("ativo nao encontrado na brapi (HTTP 404)")
+            return BrapiError(f"ativo nao encontrado na brapi (HTTP 404){sufixo}")
         if codigo == 429:
-            erro = BrapiError("brapi respondeu 429: limite de requisicoes atingido")
+            erro = BrapiError(
+                f"brapi respondeu 429: limite de requisicoes atingido{sufixo}. "
+                "Ajuste BRAPI_REQUISICOES_POR_MINUTO")
             erro.recuperavel = True  # type: ignore[attr-defined]
             return erro
         if codigo >= 500:
-            erro = BrapiError(f"brapi com erro interno (HTTP {codigo})")
+            erro = BrapiError(f"brapi com erro interno (HTTP {codigo}){sufixo}")
             erro.recuperavel = True  # type: ignore[attr-defined]
             return erro
-        return BrapiError(f"brapi respondeu HTTP {codigo}")
+        return BrapiError(f"brapi respondeu HTTP {codigo}{sufixo}")
 
 
 def _numero(valor) -> Optional[float]:
@@ -327,3 +378,26 @@ def _numero(valor) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return numero if numero > 0 else None
+
+
+def _corpo_do_erro(e) -> str:  # pragma: no cover - depende de rede
+    """O corpo que veio junto do erro HTTP, quando da para ler."""
+    try:
+        return e.read().decode("utf-8")
+    except Exception:
+        return ""
+
+
+def _mensagem_da_api(corpo: str) -> str:
+    """A explicacao que a propria API deu, se houver."""
+    if not corpo:
+        return ""
+    try:
+        dados = json.loads(corpo)
+    except ValueError:
+        return corpo.strip()[:120]
+    if isinstance(dados, dict):
+        for chave in ("message", "error", "detail"):
+            if dados.get(chave):
+                return str(dados[chave])[:200]
+    return ""
