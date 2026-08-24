@@ -10,24 +10,13 @@ from .divisao import DivisaoDeDados, Particao
 from .relatorio import Alerta, Medidas, RelatorioDeValidacao, Severidade
 from .selecao import Selecao
 from .walkforward import ResultadoWalkForward
+from ..ui import c as _c
 
 LARGURA = 86
-
-_CORES = {
-    "verde": "\033[32m", "vermelho": "\033[31m", "amarelo": "\033[33m",
-    "cinza": "\033[90m", "negrito": "\033[1m", "reset": "\033[0m",
-}
 
 _COR_DA_PARTICAO = {
     Particao.TRAIN: "cinza", Particao.VALIDATION: "amarelo", Particao.TEST: "negrito",
 }
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
 
 
 def _num(v: Optional[float], casas: int = 2, sufixo: str = "") -> str:

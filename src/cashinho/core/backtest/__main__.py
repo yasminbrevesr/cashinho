@@ -30,13 +30,7 @@ from .costs import ModeloCustos
 from .engine import BacktestEngine
 from .view import pagina, resumo
 from .view_comparacao import pagina_comparacao
-
-
-def _data(texto: str) -> date:
-    try:
-        return date.fromisoformat(texto)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"data invalida: {texto!r} (use AAAA-MM-DD)") from e
+from ..ui.argumentos import data as _data
 
 
 def _hora(texto: str) -> Optional[time]:

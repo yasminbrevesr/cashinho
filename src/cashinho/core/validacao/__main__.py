@@ -27,38 +27,8 @@ from .divisao import DivisaoDeDados, DivisaoInvalidaError
 from .validador import ConfigValidacao, ValidadorDeEstrategia
 from .view import pagina, pagina_walk_forward
 from .walkforward import ConfigWalkForward, walk_forward
-
-
-def _data(texto: str) -> date:
-    try:
-        return date.fromisoformat(texto)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"data invalida: {texto!r} (use AAAA-MM-DD)") from e
-
-
-def _percentuais(texto: str) -> tuple[float, float, float]:
-    partes = [p.strip() for p in texto.split(",")]
-    if len(partes) != 3:
-        raise argparse.ArgumentTypeError("informe tres numeros: treino,validacao,teste")
-    try:
-        valores = [float(p) for p in partes]
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"percentuais invalidos: {texto!r}") from e
-    total = sum(valores)
-    # aceita as duas escalas usuais - 0.6,0.2,0.2 e 60,20,20 - e recusa o resto.
-    # reescalar qualquer soma seria conveniente e silencioso: "0.5,0.3,0.3" viraria
-    # 45/27/27 sem ninguem avisar, e a divisao pedida nao seria a divisao feita
-    if abs(total - 1.0) < 1e-6:
-        escala = 1.0
-    elif abs(total - 100.0) < 1e-6:
-        escala = 100.0
-    else:
-        raise argparse.ArgumentTypeError(
-            f"os percentuais somam {total:g}: use fracoes que somem 1 "
-            "(0.6,0.2,0.2) ou porcentagens que somem 100 (60,20,20)")
-    if any(v <= 0 for v in valores):
-        raise argparse.ArgumentTypeError("nenhuma particao pode ficar com zero")
-    return tuple(v / escala for v in valores)  # type: ignore[return-value]
+from ..ui.argumentos import data as _data
+from ..ui.argumentos import percentuais as _percentuais
 
 
 def construir_parser() -> argparse.ArgumentParser:

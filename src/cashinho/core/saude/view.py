@@ -13,17 +13,9 @@ from typing import Optional, Sequence
 from .estados import EstadoDeSaude, Modo
 from .modelos import Componente, SaudeDoSistema
 from .telemetria import RegistroDeErro
+from ..ui import c as _c
 
 LARGURA = 72
-
-_CORES = {
-    "verde": "\033[32m",
-    "vermelho": "\033[31m",
-    "amarelo": "\033[33m",
-    "cinza": "\033[90m",
-    "negrito": "\033[1m",
-    "reset": "\033[0m",
-}
 
 _COR_DO_ESTADO = {
     EstadoDeSaude.ONLINE: "verde",
@@ -36,13 +28,6 @@ _SIMBOLO = {
     EstadoDeSaude.DEGRADED: "◐",
     EstadoDeSaude.OFFLINE: "○",
 }
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
 
 
 def _hora(ts: Optional[datetime], instante: Optional[datetime] = None) -> str:

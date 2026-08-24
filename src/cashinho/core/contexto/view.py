@@ -19,17 +19,9 @@ from .modelos import (
     NivelDeVolatilidade,
     RegimeDeMercado,
 )
+from ..ui import c as _c
 
 LARGURA = 72
-
-_CORES = {
-    "verde": "\033[32m",
-    "vermelho": "\033[31m",
-    "amarelo": "\033[33m",
-    "cinza": "\033[90m",
-    "negrito": "\033[1m",
-    "reset": "\033[0m",
-}
 
 _COR_DO_REGIME = {
     RegimeDeMercado.RISCO_LIGADO: "verde",
@@ -62,12 +54,6 @@ _COR_DA_VOLATILIDADE = {
     NivelDeVolatilidade.EXTREMA: "vermelho",
     NivelDeVolatilidade.INDISPONIVEL: "cinza",
 }
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    return "".join(_CORES[e] for e in estilos) + texto + _CORES["reset"]
 
 
 def _numero(leitura: Leitura) -> str:

@@ -19,25 +19,9 @@ from typing import Callable, Optional, Sequence
 
 from ...models import formata_dinheiro
 from .comparacao import ComparacaoTimeframes, LinhaComparacao, StatusTimeframe
+from ..ui import c as _c
 
 LARGURA = 96
-
-_CORES = {
-    "verde": "\033[32m",
-    "vermelho": "\033[31m",
-    "amarelo": "\033[33m",
-    "cinza": "\033[90m",
-    "negrito": "\033[1m",
-    "reset": "\033[0m",
-}
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
-
 
 def _num(valor: Optional[float], casas: int = 2, sufixo: str = "", sinal: bool = False) -> str:
     if valor is None:

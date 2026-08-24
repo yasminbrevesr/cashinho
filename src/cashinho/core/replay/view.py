@@ -8,21 +8,9 @@ from ...models import formata_dinheiro
 from .eventos import EventoReplay, TipoEvento
 from .grafico import grafico
 from .replay import EstadoReplay, MarketReplay
+from ..ui import c as _c
 
 LARGURA = 88
-
-_CORES = {
-    "verde": "\033[32m", "vermelho": "\033[31m", "amarelo": "\033[33m",
-    "azul": "\033[36m", "cinza": "\033[90m", "negrito": "\033[1m", "reset": "\033[0m",
-}
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
-
 
 def barra_de_progresso(fracao: float, largura: int = 40) -> str:
     cheias = int(round(max(0.0, min(1.0, fracao)) * largura))

@@ -18,6 +18,16 @@ from typing import Optional, Sequence
 
 from ...models import Series, formata_dinheiro
 from .models import Level, MarketStructure, Regime, TipoEvento, TipoPivo
+from ..ui import c as _pinta
+
+
+def _c(texto: str, cor: str, ativo: bool) -> str:
+    """Esta tela fala em alta/baixa/neutro e passa ``ativo`` por posicao.
+
+    Os apelidos semanticos moram na paleta compartilhada; o que fica aqui e'
+    so a adaptacao da assinatura.
+    """
+    return _pinta(texto, cor, ativo=ativo)
 
 # marcadores
 TOPO = "▲"      # triangulo para cima
@@ -28,22 +38,6 @@ LINHA_FORTE = "═"
 LINHA_FRACA = "─"
 LINHA_FIB = "┈"
 CONFLUENCIA = "◆"
-
-_CORES = {
-    "alta": "\033[32m",
-    "baixa": "\033[31m",
-    "neutro": "\033[33m",
-    "fraco": "\033[90m",
-    "reset": "\033[0m",
-    "negrito": "\033[1m",
-}
-
-
-def _c(texto: str, cor: str, ativo: bool) -> str:
-    if not ativo or cor not in _CORES:
-        return texto
-    return f"{_CORES[cor]}{texto}{_CORES['reset']}"
-
 
 def _cor_do_regime(regime: Regime) -> str:
     return {Regime.ALTA: "alta", Regime.BAIXA: "baixa", Regime.LATERAL: "neutro"}[regime]

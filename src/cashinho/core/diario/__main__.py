@@ -24,15 +24,9 @@ from .diario import DiarioDeTrades
 from .estatisticas import AGRUPAMENTOS
 from .modelos import Filtro
 from .view import detalhe_registro, pagina
+from ..ui.argumentos import data as _data
 
 ARQUIVO_PADRAO = Path.home() / ".cashinho" / "diario.jsonl"
-
-
-def _data(texto: str) -> date:
-    try:
-        return date.fromisoformat(texto)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"data invalida: {texto!r} (use AAAA-MM-DD)") from e
 
 
 def _direcao(texto: str) -> Direction:

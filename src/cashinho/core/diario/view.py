@@ -13,17 +13,9 @@ from ...models import formata_dinheiro
 from .diario import DiarioDeTrades
 from .estatisticas import AMOSTRA_MINIMA, Estatistica
 from .modelos import Filtro, Registro
+from ..ui import c as _c
 
 LARGURA = 104
-
-_CORES = {
-    "verde": "\033[32m",
-    "vermelho": "\033[31m",
-    "amarelo": "\033[33m",
-    "cinza": "\033[90m",
-    "negrito": "\033[1m",
-    "reset": "\033[0m",
-}
 
 TITULOS = {
     "setup": "POR SETUP",
@@ -32,13 +24,6 @@ TITULOS = {
     "dia": "POR DIA DA SEMANA",
     "timeframe": "POR TIMEFRAME",
 }
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
 
 
 def _valor(v: float, cores: bool = False) -> str:

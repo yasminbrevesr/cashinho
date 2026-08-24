@@ -25,13 +25,7 @@ from .fita import dias_disponiveis
 from .replay import MarketReplay, PassoReplay, ReplayConfig
 from .velocidade import Relogio, Velocidade
 from .view import pagina, resumo
-
-
-def _data(texto: str) -> date:
-    try:
-        return date.fromisoformat(texto)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"data invalida: {texto!r} (use AAAA-MM-DD)") from e
+from ..ui.argumentos import data as _data
 
 
 def _velocidade(texto: str) -> Velocidade:

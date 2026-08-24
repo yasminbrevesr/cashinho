@@ -14,17 +14,9 @@ from typing import Optional, Sequence
 from .modelos import AgendaDeEventos, Evento
 from .politica import AvaliacaoDeEventos
 from .tipos import Disponibilidade, Severidade, ViesDirecional
+from ..ui import c as _c
 
 LARGURA = 72
-
-_CORES = {
-    "verde": "\033[32m",
-    "vermelho": "\033[31m",
-    "amarelo": "\033[33m",
-    "cinza": "\033[90m",
-    "negrito": "\033[1m",
-    "reset": "\033[0m",
-}
 
 _COR_DA_SEVERIDADE = {
     Severidade.CRITICA: "vermelho",
@@ -32,13 +24,6 @@ _COR_DA_SEVERIDADE = {
     Severidade.MEDIA: "amarelo",
     Severidade.BAIXA: "cinza",
 }
-
-
-def _c(texto: str, *estilos: str, ativo: bool = True) -> str:
-    if not ativo:
-        return texto
-    prefixo = "".join(_CORES[e] for e in estilos if e in _CORES)
-    return f"{prefixo}{texto}{_CORES['reset']}" if prefixo else texto
 
 
 def _quando(evento: Evento, instante: Optional[datetime]) -> str:

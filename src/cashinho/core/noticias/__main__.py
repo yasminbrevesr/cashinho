@@ -18,6 +18,7 @@ from ...models import BRT
 from .fontes import FonteArquivo, SemFonte, VALIDADE_PADRAO_MIN
 from .politica import ConfigEventos, PoliticaDeEventos
 from .view import pagina
+from ..ui.argumentos import instante as _data
 
 MODELO = {
     "_modelo": (
@@ -42,14 +43,6 @@ MODELO = {
         }
     ],
 }
-
-
-def _data(texto: str) -> datetime:
-    try:
-        ts = datetime.fromisoformat(texto)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"data invalida: {texto!r}") from e
-    return ts.replace(tzinfo=BRT) if ts.tzinfo is None else ts
 
 
 def construir_parser() -> argparse.ArgumentParser:
