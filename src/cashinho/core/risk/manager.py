@@ -60,11 +60,16 @@ class RiskManager:
         config: Optional[RiskConfig] = None,
         estado: Optional[RiskState] = None,
         relogio: Optional[Callable[[], datetime]] = None,
+        log=None,
     ):
+        from ..log import RegistradorNulo
+
         self.config = config or PADRAO
         self.estado = estado or RiskState(capital_inicial=self.config.capital)
         self._relogio = relogio or (lambda: datetime.now(BRT))
         self._aprovadas: dict[str, RiskDecision] = {}
+        # sem log configurado nada e' gravado: o comportamento nao muda
+        self.log = log or RegistradorNulo()
 
     # ------------------------------------------------------------------
     # limites de estado (independem do pedido)
@@ -362,6 +367,8 @@ class RiskManager:
         self.estado.kill_switch = KillSwitch(
             codigo=codigo, motivo=motivo, acionado_em=self._relogio(), diario=diario
         )
+        self.log.aviso("risk_manager", f"KILL SWITCH ({codigo}): {motivo}",
+                       diario=diario, pnl_dia=round(self.estado.pnl_dia, 2))
         self._aprovadas.clear()  # decisoes pendentes morrem junto
 
     # ------------------------------------------------------------------

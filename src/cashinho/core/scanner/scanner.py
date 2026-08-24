@@ -236,7 +236,11 @@ class ScannerB3:
         engine: Optional[OpportunityEngine] = None,
         auditor: Optional[ContrarianAuditor] = None,
         risco: Optional[RiskManager] = None,
+        log=None,
     ):
+        from ..log import RegistradorNulo
+
+        self.log = log or RegistradorNulo()
         self.provider = provider
         self.config = config or ScannerConfig()
         self.engine = engine or OpportunityEngine()
@@ -278,6 +282,9 @@ class ScannerB3:
         try:
             serie = self.provider.candles(symbol, self.config.timeframe_base, self.config.dias)
         except DataError as e:
+            # o ativo cai fora da varredura; sem log, a falha desaparecia
+            # junto com o resultado da varredura
+            self.log.erro("market_data", f"{symbol}: {e}", symbol=symbol)
             etapas.append(Etapa(1, "Market Data", False, str(e)))
             return LinhaScanner(symbol, StatusAtivo.SEM_DADOS, str(e),
                                 etapas=self._pendentes(etapas, 1))

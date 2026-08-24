@@ -60,8 +60,11 @@ class PaperBroker(Broker):
     simulado = True
 
     def __init__(self, config: Optional[ConfigPaper] = None,
-                 relogio=None):
+                 relogio=None, log=None):
+        from ..log import RegistradorNulo
+
         self.config = config or ConfigPaper()
+        self.log = log or RegistradorNulo()
         self._relogio = relogio or (lambda: datetime.now(BRT))
         self.saldo = self.config.capital_inicial
         self._ordens: dict[str, Order] = {}
@@ -152,6 +155,7 @@ class PaperBroker(Broker):
     # kill switch
     # ------------------------------------------------------------------
     def acionar_kill_switch(self, motivo: str = "acionado manualmente") -> list[Order]:
+        self.log.aviso("paper_broker", f"KILL SWITCH acionado: {motivo}")
         """Bloqueia novas operacoes na hora.
 
         Ordens pendentes sao canceladas (senao "imediatamente" seria mentira:
@@ -261,6 +265,9 @@ class PaperBroker(Broker):
         )
 
     def _rejeitar(self, order: Order, motivo: str) -> Order:
+        self.log.aviso("paper_broker", f"ordem recusada: {motivo}",
+                       symbol=order.symbol, tipo=order.tipo.value,
+                       quantidade=order.quantidade)
         order.status = OrderStatus.REJEITADA
         order.motivo = motivo
         order.atualizada_em = self._relogio()

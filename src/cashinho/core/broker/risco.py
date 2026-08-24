@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Optional
 
 from ...models import BRT, Direction
+from ..log import RegistradorNulo
 from ..risk import PedidoOperacao, RiskDecision, RiskManager, RiskRejectionError
 from .base import Broker
 from .modelos import Balance, Operacao, Order, OrderStatus, OrderType, Position
@@ -29,10 +30,13 @@ from .modelos import Balance, Operacao, Order, OrderStatus, OrderType, Position
 class BrokerComRisco(Broker):
     """Corretora com o Risk Manager na porta."""
 
-    def __init__(self, broker: Broker, risco: RiskManager, referencia: str = ""):
+    def __init__(self, broker: Broker, risco: RiskManager, referencia: str = "",
+                 log=None):
         self.broker = broker
         self.risco = risco
         self.referencia = referencia
+        # sem log configurado, nada e' gravado - o comportamento nao muda
+        self.log = log or RegistradorNulo()
         self._decisoes: dict[str, RiskDecision] = {}
         self._rejeitadas: dict[str, Order] = {}
         self._registradas: set[str] = set()
@@ -155,6 +159,8 @@ class BrokerComRisco(Broker):
         return (p.quantidade > 0 and not order.compra) or (p.quantidade < 0 and order.compra)
 
     def _rejeitar(self, order: Order, motivo: str) -> Order:
+        self.log.aviso("risk_manager", f"ordem barrada: {motivo}",
+                       symbol=order.symbol, quantidade=order.quantidade)
         order.status = OrderStatus.REJEITADA
         order.motivo = motivo
         order.criada_em = order.criada_em or datetime.now(BRT)
@@ -187,4 +193,10 @@ class BrokerComRisco(Broker):
                 elif order.symbol.upper() in self.risco.estado.posicoes:
                     self.risco.fechar(order.symbol, order.preco_executado, custos=order.custos)
             except (RiskRejectionError, KeyError, ValueError) as e:
-                self.avisos.append(f"risco fora de sincronia com a corretora em {order.symbol}: {e}")
+                aviso = f"risco fora de sincronia com a corretora em {order.symbol}: {e}"
+                self.avisos.append(aviso)
+                # divergencia entre o risco e o que a corretora executou e' a
+                # coisa mais importante que este modulo tem a dizer: ela some
+                # da memoria no fim do processo, mas nao do arquivo
+                self.log.erro("risk_manager", aviso, symbol=order.symbol,
+                              ordem=order.id, quantidade=order.quantidade)
