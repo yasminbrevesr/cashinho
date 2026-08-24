@@ -71,6 +71,14 @@ class ConfigMarketData:
     brapi_timeframes: tuple[str, ...] = ()
     brapi_requisicoes_por_minuto: Optional[float] = None
 
+    # --- MetaTrader 5 / Genial (somente Market Data) ---
+    # nenhuma credencial: quem autentica e' o terminal, na mao
+    mt5_terminal_path: str = ""
+    mt5_fuso_do_servidor: str = "America/Sao_Paulo"
+    mt5_stale_s: Optional[float] = None
+    mt5_refresh_s: Optional[float] = None
+    mt5_resolucao_aproximada: bool = False
+
     @property
     def tem_tempo_real(self) -> bool:
         return bool(self.tempo_real.strip())
@@ -88,6 +96,10 @@ class ConfigMarketData:
             "brapi_atraso_s": self.brapi_atraso_s,
             "brapi_timeframes": list(self.brapi_timeframes),
             "brapi_requisicoes_por_minuto": self.brapi_requisicoes_por_minuto,
+            "mt5_terminal_path": self.mt5_terminal_path or None,
+            "mt5_fuso_do_servidor": self.mt5_fuso_do_servidor,
+            "mt5_stale_s": self.mt5_stale_s,
+            "mt5_refresh_s": self.mt5_refresh_s,
         }
 
 
@@ -104,4 +116,10 @@ def carregar(ambiente: Optional[Mapping[str, str]] = None) -> ConfigMarketData:
         brapi_atraso_s=numero("BRAPI_ATRASO_SEGUNDOS", None, ambiente),
         brapi_timeframes=timeframes,
         brapi_requisicoes_por_minuto=numero("BRAPI_REQUISICOES_POR_MINUTO", None, ambiente),
+        mt5_terminal_path=valor("MT5_TERMINAL_PATH", "", ambiente),
+        mt5_fuso_do_servidor=valor("MT5_SERVER_TIMEZONE", "America/Sao_Paulo", ambiente),
+        mt5_stale_s=numero("MT5_STALE_SECONDS", None, ambiente),
+        mt5_refresh_s=numero("MT5_REFRESH_SECONDS", None, ambiente),
+        mt5_resolucao_aproximada=valor(
+            "MT5_RESOLUCAO_APROXIMADA", "", ambiente).strip().lower() in ("1", "true", "sim"),
     )

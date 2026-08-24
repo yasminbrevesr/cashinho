@@ -33,6 +33,11 @@ class Cotacao:
     previous_close: Optional[float] = None
     volume: Optional[float] = None
 
+    # os dois relogios separados: cotacao e negocio chegam em instantes
+    # diferentes, e juntar os dois num campo so esconde qual esta velho
+    quote_timestamp: Optional[datetime] = None
+    trade_timestamp: Optional[datetime] = None
+
     # idade do dado em segundos, no momento da leitura. None = nao da para saber
     data_age: Optional[float] = None
     lida_em: Optional[datetime] = None
@@ -73,6 +78,11 @@ class Cotacao:
         return self.status.aviso
 
     @property
+    def tem_livro(self) -> bool:
+        """Ha bid E ask validos agora?"""
+        return self.bid is not None and self.ask is not None
+
+    @property
     def idade_legivel(self) -> str:
         if self.data_age is None:
             return "idade desconhecida"
@@ -97,6 +107,10 @@ class Cotacao:
             "previous_close": self.previous_close,
             "volume": self.volume,
             "spread": self.spread,
+            "quote_timestamp": (self.quote_timestamp.isoformat()
+                                if self.quote_timestamp else None),
+            "trade_timestamp": (self.trade_timestamp.isoformat()
+                                if self.trade_timestamp else None),
             "data_age": None if self.data_age is None else round(self.data_age, 3),
             "serve_para_tempo_real": self.serve_para_tempo_real,
             "aviso": self.aviso,

@@ -13,9 +13,28 @@ from cashinho.data.status import (
 )
 
 
-def test_os_cinco_estados_pedidos():
-    assert [e.value for e in StatusDados] == [
-        "ONLINE", "DELAYED", "STALE", "DEGRADED", "OFFLINE"]
+def test_os_estados_do_contrato_existem():
+    valores = {e.value for e in StatusDados}
+
+    assert {"ONLINE", "DELAYED", "STALE", "DEGRADED", "OFFLINE"} <= valores
+
+
+def test_mercado_fechado_e_livro_vazio_sao_estados_proprios():
+    """Sem eles, mercado fechado virava 'parou de atualizar' - outra coisa."""
+    assert StatusDados.MARKET_CLOSED.mercado_parado is True
+    assert StatusDados.NO_ACTIVE_BOOK.mercado_parado is True
+    assert StatusDados.STALE.mercado_parado is False
+
+
+def test_mercado_fechado_pesa_menos_que_falha():
+    """Nao e' defeito: ordena antes de STALE e OFFLINE."""
+    assert StatusDados.MARKET_CLOSED.peso < StatusDados.STALE.peso
+    assert StatusDados.NO_ACTIVE_BOOK.peso < StatusDados.OFFLINE.peso
+
+
+def test_nenhum_estado_novo_serve_para_tempo_real():
+    assert StatusDados.MARKET_CLOSED.serve_para_tempo_real is False
+    assert StatusDados.NO_ACTIVE_BOOK.serve_para_tempo_real is False
 
 
 def test_so_online_serve_para_tempo_real():

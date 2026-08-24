@@ -144,17 +144,27 @@ def test_sem_provedor_historico_a_leitura_e_recusada():
 # --- fabrica -------------------------------------------------------------------------
 
 
-def test_o_catalogo_separa_implementado_de_planejado():
+def test_o_catalogo_lista_os_providers_implementados():
     c = catalogo()
 
     assert c["brapi"]["disponivel"] is True
-    assert c["metatrader"]["disponivel"] is False
+    assert c["metatrader"]["disponivel"] is True
 
 
-def test_metatrader_e_recusado_com_mensagem_clara():
-    """Previsto e nao implementado nao vira outro provedor parecido."""
-    with pytest.raises(ProvedorDesconhecidoError, match="ainda nao implementado"):
-        construir("metatrader")
+def test_metatrader_e_construivel_mesmo_sem_a_biblioteca():
+    """Em Linux/CI o provedor carrega; quem falha e' a conexao, com motivo."""
+    p = construir("metatrader")
+
+    assert p.nome == "metatrader"
+    assert p.capacidades.trading is False
+
+
+def test_sem_a_biblioteca_a_conexao_diz_o_que_falta():
+    p = construir("metatrader")
+    info = p.conectar()
+
+    assert info.conectado is False
+    assert "METATRADER NAO DISPONIVEL" in info.motivo
 
 
 def test_provedor_desconhecido_lista_os_disponiveis():
@@ -169,10 +179,17 @@ def test_monta_o_servico_a_partir_da_configuracao():
     assert s.tem_tempo_real is False
 
 
-def test_configuracao_de_tempo_real_inexistente_falha_alto():
+def test_provedor_de_tempo_real_inexistente_falha_alto():
     """Nao vira historico disfarcado."""
     with pytest.raises(ProvedorDesconhecidoError):
-        montar_servico(ConfigMarketData(historico="demo", tempo_real="metatrader"))
+        montar_servico(ConfigMarketData(historico="demo", tempo_real="bloomberg"))
+
+
+def test_metatrader_pode_ocupar_o_papel_de_tempo_real():
+    s = montar_servico(ConfigMarketData(historico="demo", tempo_real="metatrader"))
+
+    assert s.tem_tempo_real is True
+    assert s.tempo_real.nome == "metatrader"
 
 
 def test_o_retrato_do_servico_diz_se_ha_analise_em_tempo_real():

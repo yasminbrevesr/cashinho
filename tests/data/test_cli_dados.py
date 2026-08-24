@@ -14,7 +14,7 @@ def test_lista_os_providers(capsys):
     saida = capsys.readouterr().out
 
     assert "brapi" in saida
-    assert "metatrader" in saida and "ainda nao" in saida
+    assert "metatrader" in saida
 
 
 def test_lista_em_json(capsys):
@@ -22,7 +22,7 @@ def test_lista_em_json(capsys):
     dados = json.loads(capsys.readouterr().out)
 
     assert dados["catalogo"]["brapi"]["disponivel"] is True
-    assert dados["catalogo"]["metatrader"]["disponivel"] is False
+    assert dados["catalogo"]["metatrader"]["disponivel"] is True
 
 
 def test_carrega_com_o_provedor_demo(capsys):
@@ -54,11 +54,20 @@ def test_finalidade_de_tempo_real_sem_provedor_sai_com_codigo(capsys):
     assert "tempo real" in saida
 
 
-def test_provedor_nao_implementado_e_recusado(capsys):
-    codigo = main(["--provider", "metatrader", "--sem-cor"])
+def test_provedor_desconhecido_e_recusado(capsys):
+    codigo = main(["--provider", "bloomberg", "--sem-cor"])
 
     assert codigo == 2
-    assert "ainda nao implementado" in capsys.readouterr().out
+    assert "desconhecido" in capsys.readouterr().out
+
+
+def test_metatrader_sem_terminal_avisa_em_vez_de_cair_para_outro(capsys):
+    """Sem fallback silencioso: nada de servir dado historico como realtime."""
+    codigo = main(["--provider", "metatrader", "--ativo", "PETR4", "--sem-cor"])
+    saida = capsys.readouterr().out
+
+    assert codigo == 2
+    assert "METATRADER NAO DISPONIVEL" in saida or "TERMINAL OFFLINE" in saida
 
 
 def test_a_tela_mostra_os_dois_papeis(capsys):

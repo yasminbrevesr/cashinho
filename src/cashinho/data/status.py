@@ -25,6 +25,10 @@ class StatusDados(str, Enum):
     STALE = "STALE"
     DEGRADED = "DEGRADED"
     OFFLINE = "OFFLINE"
+    # dois estados que o feed em tempo real trouxe: sem eles, mercado fechado
+    # e livro zerado apareciam como "parou de atualizar", que e' outra coisa
+    MARKET_CLOSED = "MARKET_CLOSED"
+    NO_ACTIVE_BOOK = "NO_ACTIVE_BOOK"
 
     @property
     def rotulo(self) -> str:
@@ -38,16 +42,24 @@ class StatusDados(str, Enum):
             "STALE": "deveria estar atualizado, mas parou de atualizar",
             "DEGRADED": "provedor respondendo parcialmente",
             "OFFLINE": "nao foi possivel obter dado",
+            "MARKET_CLOSED": "mercado fechado - o dado parado e' o esperado",
+            "NO_ACTIVE_BOOK": "sem livro ativo: nao ha bid/ask agora",
         }[self.value]
 
     @property
     def peso(self) -> int:
-        return {"ONLINE": 0, "DELAYED": 1, "DEGRADED": 2, "STALE": 3, "OFFLINE": 4}[self.value]
+        return {"ONLINE": 0, "MARKET_CLOSED": 1, "NO_ACTIVE_BOOK": 1, "DELAYED": 2,
+                "DEGRADED": 3, "STALE": 4, "OFFLINE": 5}[self.value]
 
     @property
     def tem_dado(self) -> bool:
         """Chegou numero? DELAYED e STALE chegaram - so nao servem para tudo."""
         return self is not StatusDados.OFFLINE
+
+    @property
+    def mercado_parado(self) -> bool:
+        """O dado nao muda porque nao ha o que mudar - nao e' defeito."""
+        return self in (StatusDados.MARKET_CLOSED, StatusDados.NO_ACTIVE_BOOK)
 
     @property
     def serve_para_tempo_real(self) -> bool:
@@ -67,6 +79,9 @@ class StatusDados(str, Enum):
             "STALE": "DADO PAROU DE ATUALIZAR - NAO UTILIZAR PARA ENTRADA EM TEMPO REAL",
             "DEGRADED": "PROVEDOR DEGRADADO - confira a cobertura antes de decidir",
             "OFFLINE": "SEM DADOS",
+            "MARKET_CLOSED": "MERCADO FECHADO - nao ha cotacao ativa agora",
+            "NO_ACTIVE_BOOK": "SEM LIVRO ATIVO - nao ha bid/ask; o ultimo negocio "
+                              "aparece a parte, com a idade dele",
         }[self.value]
 
 
@@ -95,6 +110,9 @@ class Capacidades:
     ticks_em_tempo_real: bool = False
     livro_de_ofertas: bool = False
     intradiario_1m: bool = False
+    # NEGOCIACAO. Falso e' o padrao e, nesta fase, o unico valor aceito:
+    # o MT5 tecnicamente sabe enviar ordem, e o Cashinho nao vai usar isso
+    trading: bool = False
     # timeframes que o provedor declara suportar; vazio = nao declarado
     timeframes: tuple[str, ...] = ()
     # atraso tipico declarado pelo provedor, em segundos. None = desconhecido,
@@ -137,6 +155,7 @@ class Capacidades:
             "ticks_em_tempo_real": self.ticks_em_tempo_real,
             "livro_de_ofertas": self.livro_de_ofertas,
             "intradiario_1m": self.intradiario_1m,
+            "trading": self.trading,
             "timeframes": list(self.timeframes),
             "atraso_tipico_s": self.atraso_tipico_s,
             "serve_para_day_trade": self.serve_para_day_trade,

@@ -19,10 +19,9 @@ IMPLEMENTADOS: dict[str, str] = {
     "csv": "arquivos locais em dados/",
     "brapi": "brapi.dev - historico e cotacao com o atraso do plano",
     "yahoo": "Yahoo Finance via yfinance (atraso tipico de ~15 min)",
+    "metatrader": "MetaTrader 5 / Genial - tempo real, somente leitura",
 }
-PLANEJADOS: dict[str, str] = {
-    "metatrader": "MetaTrader 5 / Genial - previsto, ainda nao implementado",
-}
+PLANEJADOS: dict[str, str] = {}
 
 
 class ProvedorDesconhecidoError(DataError):
@@ -57,6 +56,11 @@ def construir(nome: str, config: Optional[ConfigMarketData] = None,
         from .yahoo import YahooProvider
 
         return YahooProvider(**extra)
+
+    if chave == "metatrader":
+        from .metatrader import MetaTraderMarketDataProvider
+
+        return MetaTraderMarketDataProvider(cfg, **extra)
 
     from .brapi import BrapiMarketDataProvider
 

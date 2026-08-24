@@ -12,6 +12,10 @@ dependencies = []
 
 [project.optional-dependencies]
 yahoo = ["yfinance>=0.2"]
+# MetaTrader 5 / Genial: a biblioteca so existe no Windows. O marker impede
+# que 'pip install cashinho[metatrader]' quebre em Linux e na CI - e o codigo
+# nunca a importa no nivel de modulo, entao o resto do projeto roda sem ela
+metatrader = ["MetaTrader5>=5.0.45; platform_system == 'Windows'"]
 dev = ["pytest>=7"]
 
 [tool.setuptools.packages.find]

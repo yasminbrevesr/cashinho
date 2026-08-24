@@ -24,6 +24,8 @@ _COR_DO_STATUS = {
     StatusDados.STALE: "vermelho",
     StatusDados.DEGRADED: "amarelo",
     StatusDados.OFFLINE: "vermelho",
+    StatusDados.MARKET_CLOSED: "cinza",
+    StatusDados.NO_ACTIVE_BOOK: "amarelo",
 }
 
 
@@ -85,7 +87,11 @@ def pagina_analise(leitura: Leitura, cotacao: Optional[Cotacao] = None,
         partes.append(f"   periodo       {primeiro.ts:%d/%m %H:%M} a {ultimo.ts:%d/%m %H:%M}")
         partes.append(f"   ultimo preco  {num(ultimo.close)}")
 
-    if cotacao is not None:
+    if cotacao is not None and cotacao.quote_timestamp is not None:
+        # feed em tempo real: bloco proprio, com os dois relogios
+        partes.append("")
+        partes.append(secao_tempo_real(cotacao, cores))
+    elif cotacao is not None:
         partes.append("")
         partes.append(c(" COTACAO", "negrito", ativo=cores))
         partes.append(f"   ultimo {num(cotacao.last)}   abertura {num(cotacao.open)}"
@@ -129,6 +135,11 @@ def secao_providers(servico: MarketDataService, cores: bool = False) -> str:
                    else f"atraso tipico {atraso:.0f} s")
         linhas.append(f"   {papel:<{rotulo_largura}}{info['nome']}  ·  {detalhe}")
 
+    # detalhe do terminal, quando o provedor de tempo real for o MetaTrader
+    tempo_real = servico.tempo_real
+    if tempo_real is not None and hasattr(tempo_real, "info_do_terminal"):
+        linhas.extend(_linhas_do_terminal(tempo_real, cores))
+
     disponivel = dados["analise_em_tempo_real"] == "DISPONIVEL"
     linhas.append(f"   {'Analise em tempo real':<{rotulo_largura}}"
                   + c(dados["analise_em_tempo_real"],
@@ -136,4 +147,61 @@ def secao_providers(servico: MarketDataService, cores: bool = False) -> str:
     if not disponivel:
         linhas.append("   " + c("   novas oportunidades intradiarias bloqueadas",
                                 "vermelho", ativo=cores))
+    return "\n".join(linhas)
+
+
+def _linhas_do_terminal(provedor, cores: bool = False) -> list[str]:
+    """Terminal, servidor e a trava de negociacao - sem nada da conta."""
+    info = provedor.info_do_terminal()
+    estado = "ONLINE" if info.conectado else "TERMINAL OFFLINE"
+    if not info.conectado and "NAO DISPONIVEL" in (info.motivo or ""):
+        estado = "METATRADER NAO DISPONIVEL"
+
+    linhas = [
+        f"   {'Terminal':<24}" + c(estado, "verde" if info.conectado else "vermelho",
+                                   ativo=cores),
+    ]
+    if info.servidor:
+        linhas.append(f"   {'Servidor':<24}{info.servidor}")
+    if not info.conectado and info.motivo:
+        linhas.append(f"   {'':<24}{info.motivo[:80]}")
+
+    negocia = getattr(provedor, "capacidades", None)
+    if negocia is not None:
+        rotulo = "LIBERADO" if negocia.trading else "BLOQUEADO"
+        linhas.append(f"   {'Trading real':<24}"
+                      + c(rotulo, "vermelho" if negocia.trading else "verde", ativo=cores))
+    return linhas
+
+
+def secao_tempo_real(cotacao, cores: bool = False) -> str:
+    """O bloco DADOS EM TEMPO REAL da tela de Analise."""
+    from ..core.ui import hora
+
+    titulo = c(" DADOS EM TEMPO REAL", "negrito", ativo=cores)
+    if cotacao is None:
+        return f"{titulo}\n   sem cotacao carregada"
+
+    cor = _COR_DO_STATUS[cotacao.status]
+    linhas = [titulo, f"   {cotacao.symbol}", ""]
+
+    if cotacao.tem_livro:
+        linhas.append(f"   {'Bid':<10}{num(cotacao.bid)}"
+                      f"      {'Ask':<10}{num(cotacao.ask)}"
+                      f"      {'Spread':<10}{num(cotacao.spread)}")
+    else:
+        linhas.append("   " + c("Bid/Ask      SEM LIVRO ATIVO", "amarelo", ativo=cores))
+        linhas.append("   " + c("             o terminal devolveu bid/ask zerados - "
+                                "isso e' ausencia de livro, nao preco zero",
+                                "cinza", ativo=cores))
+
+    linhas.append(f"   {'Last':<10}{num(cotacao.last)}"
+                  f"      {'Volume':<10}{num(cotacao.volume, casas=0)}")
+    linhas.append("")
+    linhas.append(f"   {'Cotacao em':<14}{hora(cotacao.quote_timestamp, segundos=True)}")
+    linhas.append(f"   {'Negocio em':<14}{hora(cotacao.trade_timestamp, segundos=True)}")
+    linhas.append(f"   {'Idade':<14}{cotacao.idade_legivel}")
+    linhas.append(f"   {'Status':<14}" + c(cotacao.status.value, cor, ativo=cores))
+    if cotacao.aviso:
+        linhas.append("   " + c(cotacao.aviso, cor, ativo=cores))
     return "\n".join(linhas)
