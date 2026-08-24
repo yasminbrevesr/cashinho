@@ -15,6 +15,24 @@ from streamlit.testing.v1 import AppTest
 
 pytestmark = pytest.mark.integration
 
+
+@pytest.fixture(autouse=True)
+def _fonte_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Este arquivo descreve a configuracao com CSVs locais.
+
+    Sem declarar isso, os testes herdariam `CASHINHO_MT5_ENABLED` da maquina e
+    passariam a falhar em quem tem o MetaTrader habilitado - falha que fala
+    sobre o ambiente, nao sobre a pagina. O cenario com MT5 tem arquivo
+    proprio: `test_mt5_ui.py`.
+    """
+    from cashinho.config.settings import reset_settings_cache
+
+    monkeypatch.setenv("CASHINHO_MT5_ENABLED", "false")
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
+
+
 ROOT = Path(__file__).resolve().parents[2]
 PAGES_DIR = ROOT / "app" / "pages"
 
@@ -74,14 +92,6 @@ def test_analise_sem_carregar_nao_desenha_grafico() -> None:
     app = AppTest.from_file(str(PAGES_DIR / "analise.py"), default_timeout=30).run()
     assert not app.exception
     assert len(app.get("plotly_chart")) == 0
-
-
-def test_analise_declara_inspecao_historica_em_modo_ao_vivo() -> None:
-    """O rebaixamento para RESEARCH precisa ser visivel, nao silencioso."""
-    app = AppTest.from_file(str(PAGES_DIR / "analise.py"), default_timeout=30).run()
-    avisos = " ".join(i.value for i in app.info)
-    assert "inspeção histórica" in avisos
-    assert "PAPER" in avisos
 
 
 def test_analise_desenha_indicadores_selecionados() -> None:
