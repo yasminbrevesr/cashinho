@@ -165,19 +165,30 @@ class MetaTraderTerminal:
         """Poe o ativo na Observacao do Mercado - sem isso nao chega tick."""
         return bool(self.library.symbol_select(symbol, True))
 
-    def ticks(
-        self, symbol: str, since: datetime, count: int, kind: str
+    def ticks_range(
+        self, symbol: str, start: datetime, end: datetime, kind: str
     ) -> tuple[dict[str, Any], ...]:
-        """Ticks do tipo pedido, como dicionarios simples."""
+        """Ticks do intervalo `[start, end]`, em horario do servidor.
+
+        Usa `copy_ticks_range`, e nao `copy_ticks_from`, por um motivo
+        verificado no terminal: `copy_ticks_from(symbol, since, N, ...)`
+        devolve os **primeiros** N ticks a partir de `since`. Com mercado
+        movimentado, N enche com eventos do inicio da janela e os mais
+        recentes ficam de fora - o adapter entregaria preco velho como atual,
+        que e exatamente o que a regra 5 proibe.
+
+        Com intervalo explicito ate `end`, o ultimo elemento e o evento mais
+        recente de verdade.
+        """
         library = self.library
         constant = getattr(library, kind, None)
         if constant is None:
             raise MetaTraderError(f"a biblioteca MetaTrader5 nao expoe {kind}")
 
-        raw = library.copy_ticks_from(symbol, since, count, constant)
+        raw = library.copy_ticks_range(symbol, start, end, constant)
         if raw is None:
             raise MetaTraderError(
-                f"copy_ticks_from({symbol}, {kind}) falhou: {self._last_error()}"
+                f"copy_ticks_range({symbol}, {kind}) falhou: {self._last_error()}"
             )
         return tuple(_as_dict(tick) for tick in raw)
 

@@ -72,8 +72,15 @@ def test_analise_nao_cai_para_csv_quando_o_feed_falha(com_metatrader: None) -> N
     assert len(app.get("plotly_chart")) == 0
 
 
-def test_com_csv_a_analise_continua_desenhando() -> None:
-    """A configuracao padrao (sem MT5) segue funcionando como antes."""
+def test_com_csv_a_analise_continua_desenhando(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configuracao sem MT5 segue funcionando como antes.
+
+    Declara o proprio ambiente em vez de herdar: o teste descreve a
+    configuracao CSV, e nao pode depender de como a maquina esta configurada.
+    """
+    monkeypatch.setenv("CASHINHO_MT5_ENABLED", "false")
+    reset_settings_cache()
+
     if not (PAGES_DIR.parents[1] / "data" / "fixtures" / "PETR4" / "5m.csv").is_file():
         pytest.skip("fixtures nao geradas; rode scripts/generate_fixtures.py")
 
@@ -85,3 +92,4 @@ def test_com_csv_a_analise_continua_desenhando() -> None:
     app.button[0].click().run()
 
     assert len(app.get("plotly_chart")) == 1
+    reset_settings_cache()

@@ -15,6 +15,24 @@ from streamlit.testing.v1 import AppTest
 
 pytestmark = pytest.mark.integration
 
+
+@pytest.fixture(autouse=True)
+def _fonte_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Este arquivo descreve a configuracao com CSVs locais.
+
+    Sem declarar isso, os testes herdariam `CASHINHO_MT5_ENABLED` da maquina e
+    passariam a falhar em quem tem o MetaTrader habilitado - falha que fala
+    sobre o ambiente, nao sobre a pagina. O cenario com MT5 tem arquivo
+    proprio: `test_mt5_ui.py`.
+    """
+    from cashinho.config.settings import reset_settings_cache
+
+    monkeypatch.setenv("CASHINHO_MT5_ENABLED", "false")
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
+
+
 ROOT = Path(__file__).resolve().parents[2]
 PAGES_DIR = ROOT / "app" / "pages"
 

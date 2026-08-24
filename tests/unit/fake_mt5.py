@@ -108,8 +108,14 @@ class FakeMetaTrader5:
         self._connected = connected
         self._initialize_ok = initialize_ok
         self._symbols = list(symbols)
-        self._quote_ticks = list(quote_ticks if quote_ticks is not None else [quote_tick()])
-        self._trade_ticks = list(trade_ticks if trade_ticks is not None else [trade_tick()])
+        self._quote_ticks = sorted(
+            quote_ticks if quote_ticks is not None else [quote_tick()],
+            key=lambda t: t["time"],
+        )
+        self._trade_ticks = sorted(
+            trade_ticks if trade_ticks is not None else [trade_tick()],
+            key=lambda t: t["time"],
+        )
         self._rates = list(rates if rates is not None else [rate(m) for m in (3, 2, 1)])
         self._error = error
         self.selected: list[str] = []
@@ -154,10 +160,26 @@ class FakeMetaTrader5:
     def copy_ticks_from(
         self, symbol: str, since: datetime, count: int, kind: int
     ) -> list[dict[str, Any]]:
+        """Os **primeiros** `count` ticks a partir de `since`.
+
+        E o comportamento real da biblioteca, e a razao de o adapter nao usar
+        esta funcao: com mercado movimentado, `count` enche com o comeco da
+        janela e os eventos recentes ficam de fora.
+        """
         self.calls.append(f"copy_ticks_from({symbol}, {kind})")
-        if kind == self.COPY_TICKS_INFO:
-            return list(self._quote_ticks)
-        return list(self._trade_ticks)
+        stream = self._quote_ticks if kind == self.COPY_TICKS_INFO else self._trade_ticks
+        dentro = [t for t in stream if t["time"] >= since.replace(tzinfo=UTC).timestamp()]
+        return dentro[:count]
+
+    def copy_ticks_range(
+        self, symbol: str, start: datetime, end: datetime, kind: int
+    ) -> list[dict[str, Any]]:
+        """Todos os ticks de `[start, end]`, em ordem cronologica."""
+        self.calls.append(f"copy_ticks_range({symbol}, {kind})")
+        stream = self._quote_ticks if kind == self.COPY_TICKS_INFO else self._trade_ticks
+        inicio = start.replace(tzinfo=UTC).timestamp()
+        fim = end.replace(tzinfo=UTC).timestamp()
+        return [t for t in stream if inicio <= t["time"] <= fim]
 
     def copy_rates_from_pos(
         self, symbol: str, timeframe: int, start: int, count: int

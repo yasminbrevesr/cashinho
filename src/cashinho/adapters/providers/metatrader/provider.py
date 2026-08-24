@@ -61,7 +61,6 @@ PROVIDER_NAME = "metatrader"
 TICK_LOOKBACK_MINUTES = 30
 """Janela de ticks consultada para montar a cotacao."""
 
-TICK_COUNT = 500
 DEFAULT_STALE_SECONDS = 60
 
 _CANDLES_PER_DAY: dict[Timeframe, int] = {
@@ -226,25 +225,35 @@ class MetaTraderMarketDataProvider:
         )
 
     def feed_status(self, symbol: str) -> FeedStatus:
-        """Estado do feed - `initialize() == True` nao basta para dizer ONLINE."""
+        """Estado do feed. `initialize() == True` nao basta para dizer ONLINE.
+
+        Nao se apoia em `get_quote` de proposito: sem tick na janela a cotacao
+        nao existe, e isso significa coisas diferentes conforme a hora. Fora
+        do pregao, silencio e o esperado (`MARKET_CLOSED`); com o mercado
+        aberto, e a fonte que parou (`STALE`). Chamar os dois de OFFLINE
+        misturaria "terminal caido" com "nada a buscar".
+        """
         info = self.terminal_info()
         if not info.connected:
             return FeedStatus.OFFLINE
 
+        now = self._clock.now()
+        market_open = self._calendar.is_open(now)
+
         try:
-            quote = self.get_quote(symbol)
+            bid, ask, quote_time = self._latest_book(symbol, now)
+            _, _, trade_time = self._latest_trade(symbol, now)
         except CashinhoError:
             return FeedStatus.OFFLINE
 
-        now = self._clock.now()
-        age = (now - quote.timestamp).total_seconds()
+        moments = [t for t in (quote_time, trade_time) if t is not None]
+        if not moments:
+            return FeedStatus.STALE if market_open else FeedStatus.MARKET_CLOSED
+
+        age = (now - max(moments)).total_seconds()
         if age > self._stale_seconds:
-            return (
-                FeedStatus.STALE
-                if self._calendar.is_open(now)
-                else FeedStatus.MARKET_CLOSED
-            )
-        if not quote.has_active_book:
+            return FeedStatus.STALE if market_open else FeedStatus.MARKET_CLOSED
+        if bid is None or ask is None:
             return FeedStatus.NO_ACTIVE_BOOK
         return FeedStatus.ONLINE
 
@@ -320,34 +329,57 @@ class MetaTraderMarketDataProvider:
     def _recent_ticks(
         self, symbol: str, kind: str, now: datetime
     ) -> list[dict[str, Any]]:
-        """Ticks da janela recente, do mais novo para o mais antigo."""
-        since = self._time.server_now(now) - timedelta(minutes=TICK_LOOKBACK_MINUTES)
+        """Ticks da janela recente, em ordem cronologica.
+
+        O intervalo termina em `agora` de proposito: pedir "os N primeiros a
+        partir de ha 30 minutos" devolve o comeco da janela quando o mercado
+        esta movimentado, e o adapter passaria a entregar preco velho.
+        """
+        server_now = self._time.server_now(now)
+        start = server_now - timedelta(minutes=TICK_LOOKBACK_MINUTES)
         try:
-            ticks = self._terminal.ticks(symbol, since, TICK_COUNT, kind)
+            ticks = self._terminal.ticks_range(symbol, start, server_now, kind)
         except (MetaTraderError, MetaTraderUnavailableError) as exc:
             logger.warning(
-                "falha ao ler ticks", extra={"symbol": symbol, "kind": kind,
-                                             "error": str(exc)}
+                "falha ao ler ticks",
+                extra={"symbol": symbol, "kind": kind, "error": str(exc)},
             )
             return []
-        return list(reversed(ticks))
+        return list(ticks)
 
     def _latest_book(
         self, symbol: str, now: datetime
     ) -> tuple[Decimal | None, Decimal | None, datetime | None]:
-        """Bid/ask do ultimo tick de COTACAO com os dois lados validos."""
-        for tick in self._recent_ticks(symbol, TICKS_INFO, now):
-            bid = _price(tick.get("bid"))
-            ask = _price(tick.get("ask"))
-            if bid is not None and ask is not None:
-                return bid, ask, self._moment(tick)
-        return None, None, None
+        """O estado ATUAL do livro - o ultimo evento de cotacao, e so ele.
+
+        Nao ha recuo: se o evento mais recente traz bid ou ask zerado, o livro
+        **nao esta ativo agora**, e a resposta e ausencia. Procurar para tras
+        um tick com precos validos devolveria um livro que ja nao existe, com
+        cara de cotacao atual - o erro mais caro que esta camada pode cometer.
+
+        O instante e devolvido mesmo sem livro: ele prova que o feed esta
+        vivo, o que separa NO_ACTIVE_BOOK de OFFLINE.
+        """
+        ticks = self._recent_ticks(symbol, TICKS_INFO, now)
+        if not ticks:
+            return None, None, None
+
+        latest = ticks[-1]
+        moment = self._moment(latest)
+        bid = _price(latest.get("bid"))
+        ask = _price(latest.get("ask"))
+        if bid is None or ask is None:
+            # um lado zerado ja e livro inativo: meio book nao e cotacao
+            return None, None, moment
+        return bid, ask, moment
 
     def _latest_trade(
         self, symbol: str, now: datetime
     ) -> tuple[Decimal | None, int | None, datetime | None]:
         """Last/volume do ultimo tick de NEGOCIO com preco valido."""
-        for tick in self._recent_ticks(symbol, TICKS_TRADE, now):
+        # negocio e evento, nao estado: o ultimo negocio VALIDO continua sendo
+        # o ultimo negocio, mesmo que depois dele venham ticks sem preco
+        for tick in reversed(self._recent_ticks(symbol, TICKS_TRADE, now)):
             last = _price(tick.get("last"))
             if last is not None:
                 raw_volume = tick.get("volume_real") or tick.get("volume")

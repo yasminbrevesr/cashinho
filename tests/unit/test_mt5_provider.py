@@ -284,10 +284,26 @@ def test_dado_parado_fora_do_pregao_e_mercado_fechado() -> None:
     assert status.market_is_idle is True
 
 
-def test_sem_tick_nenhum_e_offline() -> None:
+def test_terminal_conectado_sem_tick_no_pregao_e_stale_e_nao_offline() -> None:
+    """Terminal respondeu e nao ha tick: a FONTE parou, o terminal nao caiu."""
     library = FakeMetaTrader5(quote_ticks=[], trade_ticks=[])
 
+    assert build(library).feed_status("PETR4") is FeedStatus.STALE
+
+
+def test_terminal_desconectado_e_offline() -> None:
+    """OFFLINE fica reservado para o terminal fora do ar."""
+    library = FakeMetaTrader5(connected=False)
+
     assert build(library).feed_status("PETR4") is FeedStatus.OFFLINE
+
+
+def test_sem_tick_fora_do_pregao_e_mercado_fechado() -> None:
+    """Silencio as 20h e o esperado, nao defeito."""
+    night = datetime(2026, 8, 20, 23, 30, tzinfo=UTC)
+    library = FakeMetaTrader5(quote_ticks=[], trade_ticks=[])
+
+    assert build(library, now=night).feed_status("PETR4") is FeedStatus.MARKET_CLOSED
 
 
 def test_o_limite_de_stale_e_configuravel() -> None:
@@ -388,3 +404,82 @@ def test_linha_incoerente_e_descartada_sem_derrubar_a_serie() -> None:
     series = build(library).get_candles("PETR4", Timeframe.M1, **janela())
 
     assert len(series) == 2
+
+
+# ---------------------------------------------------------------------------
+# regressao: os dois defeitos encontrados na revisao
+# ---------------------------------------------------------------------------
+
+
+def test_usa_intervalo_ate_agora_e_nao_os_primeiros_n_ticks() -> None:
+    """`copy_ticks_from` devolve os PRIMEIROS N a partir de `since`.
+
+    Com mercado movimentado, N enche com o comeco da janela e o preco recente
+    fica de fora - o adapter entregaria cotacao velha como atual. Aqui a
+    janela tem 600 eventos: os 500 primeiros trazem 42.00, e so o ultimo
+    traz 42.50.
+    """
+    antigos = [
+        quote_tick(bid=42.00, ask=42.01, moment=NOW - timedelta(minutes=25, seconds=s))
+        for s in range(600, 0, -1)
+    ]
+    recente = quote_tick(bid=42.50, ask=42.51, moment=NOW - timedelta(seconds=2))
+    library = FakeMetaTrader5(quote_ticks=[*antigos, recente])
+
+    quote = build(library).get_quote("PETR4")
+
+    assert quote.bid == Decimal("42.50")
+    assert "copy_ticks_range" in " ".join(library.calls)
+    assert "copy_ticks_from" not in " ".join(library.calls)
+
+
+def test_o_livro_atual_nao_retrocede_para_um_book_antigo() -> None:
+    """Se o evento mais recente tem bid/ask zerados, o livro nao esta ativo.
+
+    Procurar para tras um tick com precos validos devolveria um livro que ja
+    nao existe, com cara de cotacao atual.
+    """
+    valido = quote_tick(bid=42.06, ask=42.07, moment=NOW - timedelta(minutes=3))
+    zerado = quote_tick(bid=0.0, ask=0.0, moment=NOW - timedelta(seconds=2))
+    library = FakeMetaTrader5(quote_ticks=[valido, zerado])
+
+    provider = build(library)
+    quote = provider.get_quote("PETR4")
+
+    assert quote.bid is None
+    assert quote.ask is None
+    assert quote.has_active_book is False
+    assert provider.feed_status("PETR4") is FeedStatus.NO_ACTIVE_BOOK
+
+
+def test_um_lado_zerado_no_evento_atual_ja_invalida_o_livro() -> None:
+    """Meio book nao e cotacao."""
+    valido = quote_tick(bid=42.06, ask=42.07, moment=NOW - timedelta(minutes=3))
+    meio = quote_tick(bid=42.06, ask=0.0, moment=NOW - timedelta(seconds=2))
+    library = FakeMetaTrader5(quote_ticks=[valido, meio])
+
+    assert build(library).get_quote("PETR4").has_active_book is False
+
+
+def test_livro_inativo_ainda_prova_que_o_feed_esta_vivo() -> None:
+    """NO_ACTIVE_BOOK nao pode virar OFFLINE: o terminal esta respondendo."""
+    library = FakeMetaTrader5(quote_ticks=[quote_tick(bid=0.0, ask=0.0)])
+
+    status = build(library).feed_status("PETR4")
+
+    assert status is FeedStatus.NO_ACTIVE_BOOK
+    assert status.has_data is True
+
+
+def test_o_ultimo_negocio_continua_valendo_apesar_do_livro_zerado() -> None:
+    """Negocio e evento, nao estado: ele nao expira porque o book fechou."""
+    library = FakeMetaTrader5(
+        quote_ticks=[quote_tick(bid=0.0, ask=0.0)],
+        trade_ticks=[trade_tick(last=42.07, volume=400)],
+    )
+
+    quote = build(library).get_quote("PETR4")
+
+    assert quote.price == Decimal("42.07")
+    assert quote.trade_volume == 400
+    assert quote.bid is None
