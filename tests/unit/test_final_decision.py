@@ -76,6 +76,17 @@ def test_candle_aberto_nunca_libera() -> None:
     ).should_enter
 
 
+def test_timeframe_analisado_e_preservado_quando_nao_entra() -> None:
+    decision = make_final_decision(
+        opportunity(trigger_confirmed=False),
+        data_quality_approved=True,
+        risk_approved=True,
+        candles_closed=True,
+    )
+    assert not decision.should_enter
+    assert decision.timeframe is Timeframe.M5
+
+
 def test_score_sozinho_nunca_libera() -> None:
     decision = make_final_decision(
         opportunity(score=100, trigger_confirmed=False),

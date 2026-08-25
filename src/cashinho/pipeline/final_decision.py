@@ -82,7 +82,7 @@ def make_final_decision(
         approved,
         opportunity.side if approved else "NONE",
         opportunity.symbol,
-        opportunity.recommended_timeframe if approved else None,
+        opportunity.recommended_timeframe,
         opportunity.score,
         opportunity.entry if approved else None,
         opportunity.stop if approved else None,

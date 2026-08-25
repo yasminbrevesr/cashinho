@@ -29,7 +29,7 @@ from cashinho.adapters.providers.csv_provider import ProviderError
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.clocks import SystemClock
-from cashinho.domain.enums import DataStatus, Mode
+from cashinho.domain.enums import DataStatus, Mode, Timeframe
 from cashinho.domain.errors import CashinhoError
 from cashinho.domain.risk import RiskProfile
 from cashinho.pipeline.entry_signal import evaluate_entry_signal
@@ -72,6 +72,28 @@ choice = build_market_data_provider(
 )
 
 provider = choice.provider
+
+
+@st.cache_data(ttl=5, show_spinner=False)
+def cached_market_data(
+    _provider: object,
+    _clock: object,
+    *,
+    symbol_value: str,
+    timeframe_value: str,
+    start_value: datetime,
+    end_value: datetime,
+):
+    """Cache curto para conter reruns do Streamlit sem congelar o feed."""
+    return load_market_data(
+        _provider,
+        symbol=symbol_value,
+        timeframe=Timeframe(timeframe_value),
+        start=start_value,
+        end=end_value,
+        clock=_clock,
+        mode=INSPECTION_MODE,
+    )
 
 
 # ============================================================
@@ -405,14 +427,13 @@ end = datetime.combine(
 # ============================================================
 
 try:
-    result = load_market_data(
+    result = cached_market_data(
         provider,
-        symbol=symbol,
-        timeframe=timeframe,
-        start=start,
-        end=end,
-        clock=clock,
-        mode=INSPECTION_MODE,
+        clock,
+        symbol_value=symbol,
+        timeframe_value=timeframe.value,
+        start_value=start,
+        end_value=end,
     )
 
 except (ProviderError, CashinhoError) as exc:
@@ -485,14 +506,13 @@ quality_statuses = [result.report.status]
 for context_timeframe in available:
     if context_timeframe is timeframe:
         continue
-    context_result = load_market_data(
+    context_result = cached_market_data(
         provider,
-        symbol=symbol,
-        timeframe=context_timeframe,
-        start=start,
-        end=end,
-        clock=clock,
-        mode=INSPECTION_MODE,
+        clock,
+        symbol_value=symbol,
+        timeframe_value=context_timeframe.value,
+        start_value=start,
+        end_value=end,
     )
     quality_statuses.append(context_result.report.status)
     if context_result.usable_series is not None:
@@ -557,30 +577,43 @@ if last_closed is not None:
 
 st.divider()
 last_price = series.last.close if series.last else None
-top_symbol, top_price, top_timeframe, top_feed = st.columns(4)
-top_symbol.metric("Ativo", symbol)
-top_price.metric("Preço atual", f"R$ {last_price:.2f}" if last_price is not None else "—")
-top_timeframe.metric("Timeframe sugerido", decision.timeframe.value if decision.timeframe else "—")
-top_feed.metric("Status do feed", "MT5" if choice.is_metatrader else "HISTÓRICO")
+header_left, header_right = st.columns(2)
+header_left.markdown(f"### {symbol}")
+header_left.caption(
+    f"Timeframe analisado: **{decision.timeframe.value if decision.timeframe else timeframe.value}**"
+)
+header_right.markdown(f"### R$ {last_price:.2f}" if last_price is not None else "### —")
+header_right.caption("MT5 ONLINE" if choice.is_metatrader else "DADOS HISTÓRICOS")
 
-st.markdown("## Decisão")
-if decision.should_enter:
-    side_label = "COMPRA" if decision.side == "BUY" else "VENDA"
-    st.success(f"## 🟢 ENTRADA LIBERADA\n### {side_label}")
-    entry_col, stop_col, target_col, rr_col = st.columns(4)
-    entry_col.metric("Entrada", f"R$ {decision.entry:.2f}")
-    stop_col.metric("Stop", f"R$ {decision.stop:.2f}")
-    target_col.metric("Alvo", f"R$ {decision.target:.2f}")
-    rr_col.metric("R:R", f"{decision.risk_reward:.2f}")
-    st.metric("Confiança da oportunidade", f"{decision.confidence}/100")
-else:
-    st.info("## ⚪ NÃO ENTRAR\nNão há uma entrada válida neste momento.")
-    st.metric("Confiança da oportunidade", f"{decision.confidence}/100")
-    st.write(f"**Principal motivo:** {decision.primary_reason}")
+entrada_liberada = (
+    decision.should_enter
+    and decision.side in {"BUY", "SELL"}
+    and decision.entry is not None
+    and decision.stop is not None
+    and decision.target is not None
+)
+ticket_context = f"{symbol}:{decision.timeframe}:{decision.timestamp.isoformat()}:{decision.side}"
+if st.session_state.get("paper_ticket_context") != ticket_context:
+    st.session_state["paper_ticket_context"] = ticket_context
+    st.session_state["paper_ticket_open"] = False
 
-with st.expander("Por que essa decisão?"):
-    for reason in decision.reasons:
-        st.write(f"• {reason}")
+with st.container(border=True):
+    if decision.should_enter:
+        side_label = "COMPRA" if decision.side == "BUY" else "VENDA"
+        st.success(f"## 🟢 ENTRADA LIBERADA\n### {side_label}")
+        entry_col, stop_col, target_col, rr_col = st.columns(4)
+        entry_col.metric("Entrada", f"R$ {decision.entry:.2f}")
+        stop_col.metric("Stop", f"R$ {decision.stop:.2f}")
+        target_col.metric("Alvo", f"R$ {decision.target:.2f}")
+        rr_col.metric("R:R", f"{decision.risk_reward:.2f}")
+        confidence_col, button_col = st.columns([1, 2])
+        confidence_col.metric("Confiança", f"{decision.confidence}/100")
+        if button_col.button("ABRIR BOLETA PAPER", type="primary", use_container_width=True):
+            st.session_state["paper_ticket_open"] = True
+    else:
+        st.info("## ⚪ NÃO ENTRAR")
+        st.write("Ainda não existe uma entrada válida neste momento.")
+        st.write(f"**{decision.primary_reason}**")
 
 st.caption("Análise e execução exclusivamente PAPER.")
 
@@ -608,17 +641,6 @@ st.plotly_chart(
 
 st.divider()
 
-
-entrada_liberada = (
-    decision.should_enter
-    and decision.side in {"BUY", "SELL"}
-    and decision.entry is not None
-    and decision.stop is not None
-    and decision.target is not None
-)
-
-if entrada_liberada and st.button("ABRIR BOLETA PAPER", type="primary"):
-    st.session_state["paper_ticket_open"] = True
 
 boleta_disponivel = entrada_liberada and st.session_state.get("paper_ticket_open", False)
 
@@ -1130,6 +1152,10 @@ else:
 
 st.divider()
 render_paper_orders(paper_broker)
+
+with st.expander("Por que essa decisão?", expanded=False):
+    for reason in decision.reasons:
+        st.write(f"• {reason}")
 
 with st.expander("Multi-timeframe", expanded=False):
     st.write(
