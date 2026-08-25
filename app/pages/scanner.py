@@ -10,11 +10,12 @@ from app.components.chrome import page_header, sidebar
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.clocks import SystemClock
-from cashinho.domain.enums import Mode
+from cashinho.domain.enums import DataStatus, Mode
+from cashinho.pipeline.final_decision import make_final_decision
 from cashinho.pipeline.indicators import IndicatorSelection
 from cashinho.pipeline.market_data import load_market_data
 from cashinho.pipeline.multi_timeframe import advise_timeframe, analyze_timeframes
-from cashinho.pipeline.opportunities import build_opportunity, rank_opportunities
+from cashinho.pipeline.opportunities import build_opportunity
 from cashinho.pipeline.paper_ticket import calculate_ticket_sizing
 
 settings = get_settings()
@@ -35,7 +36,7 @@ lookback = st.number_input("Janela de análise (dias)", 5, 365, 60)
 if st.button("Atualizar ranking", type="primary"):
     end = clock.now()
     start = end - timedelta(days=int(lookback))
-    opportunities = []
+    decisions = []
     for symbol in choice.offered_symbols():
         analyses_series = {}
         statuses = []
@@ -73,30 +74,37 @@ if st.button("Atualizar ranking", type="primary"):
             except ValueError:
                 pass
         data_status = max(statuses, key=lambda item: list(type(item)).index(item))
-        opportunities.append(
-            build_opportunity(
-                symbol=symbol,
-                advice=advice,
-                analyses=analyses,
-                data_status=data_status,
+        opportunity = build_opportunity(
+            symbol=symbol,
+            advice=advice,
+            analyses=analyses,
+            data_status=data_status,
+            risk_approved=risk_approved,
+            timestamp=max(timestamps) if timestamps else datetime.now(UTC),
+        )
+        decisions.append(
+            make_final_decision(
+                opportunity,
+                data_quality_approved=data_status is not DataStatus.BLOCKED,
                 risk_approved=risk_approved,
-                timestamp=max(timestamps) if timestamps else datetime.now(UTC),
+                candles_closed=True,
+                minimum_risk_reward=settings.risk_profile().min_risk_reward,
             )
         )
-    st.session_state["opportunity_ranking"] = rank_opportunities(opportunities)
+    st.session_state["final_decision_ranking"] = sorted(
+        decisions, key=lambda item: (item.should_enter, item.confidence), reverse=True
+    )
 
-ranking = st.session_state.get("opportunity_ranking", [])
+ranking = st.session_state.get("final_decision_ranking", [])
 if ranking:
     rows = [
         {
             "Ativo": item.symbol,
-            "Lado": item.side,
-            "Regime": item.regime.value,
-            "TF": item.recommended_timeframe.value if item.recommended_timeframe else "—",
-            "Score": item.score,
-            "Gatilho": "SIM" if item.trigger_confirmed else "NÃO",
+            "Decisão": "ENTRADA" if item.should_enter else "NÃO ENTRAR",
+            "Lado": ("COMPRA" if item.side == "BUY" else "VENDA" if item.side == "SELL" else "—"),
+            "Timeframe": item.timeframe.value if item.timeframe else "—",
+            "Confiança": item.confidence,
             "R:R": item.risk_reward,
-            "Estado": item.state,
         }
         for item in ranking
     ]
@@ -104,9 +112,9 @@ if ranking:
     selected_symbol = st.selectbox("Abrir oportunidade", [item.symbol for item in ranking])
     selected = next(item for item in ranking if item.symbol == selected_symbol)
     st.markdown(f"### {selected.symbol} · {selected.state}")
-    st.write("Contexto:", ", ".join(tf.value for tf in selected.context_timeframes) or "—")
-    st.write("Gatilho:", selected.trigger_timeframe.value if selected.trigger_timeframe else "—")
-    for reason in (*selected.reasons, *selected.rejection_reasons):
-        st.write(f"• {reason}")
+    st.write(selected.primary_reason)
+    with st.expander("Por que essa decisão?"):
+        for reason in selected.reasons:
+            st.write(f"• {reason}")
 else:
     st.info("Atualize o ranking para avaliar os ativos disponíveis no provider.")

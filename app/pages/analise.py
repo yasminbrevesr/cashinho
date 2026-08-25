@@ -29,12 +29,15 @@ from cashinho.adapters.providers.csv_provider import ProviderError
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.clocks import SystemClock
-from cashinho.domain.enums import Mode
+from cashinho.domain.enums import DataStatus, Mode
 from cashinho.domain.errors import CashinhoError
 from cashinho.domain.risk import RiskProfile
 from cashinho.pipeline.entry_signal import evaluate_entry_signal
+from cashinho.pipeline.final_decision import make_final_decision
 from cashinho.pipeline.indicators import IndicatorSelection, compute_panel
 from cashinho.pipeline.market_data import load_market_data
+from cashinho.pipeline.multi_timeframe import advise_timeframe, analyze_timeframes
+from cashinho.pipeline.opportunities import build_opportunity
 from cashinho.pipeline.paper_broker import JsonPaperOrderRepository, PaperBroker, PaperOrderType
 from cashinho.pipeline.paper_ticket import (
     build_paper_ticket,
@@ -123,7 +126,7 @@ if settings.mode.requires_realtime_data and not choice.realtime:
 # ATIVO / TIMEFRAME / PERIODO
 # ============================================================
 
-col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1])
+col1, col2, col3 = st.columns([1.2, 1, 1])
 
 with col1:
     symbol = st.selectbox(
@@ -145,22 +148,13 @@ except CashinhoError as exc:
     st.stop()
 
 
-with col2:
-    timeframe = st.selectbox(
-        "Timeframe",
-        options=available,
-        index=min(
-            1,
-            len(available) - 1,
-        ),
-        format_func=lambda tf: tf.value,
-    )
+timeframe = next((tf for tf in available if tf.value == "5m"), available[0])
 
 
 hoje = datetime.now(UTC).date()
 
 
-with col3:
+with col2:
     start_date = st.date_input(
         "Início",
         value=hoje - timedelta(days=30),
@@ -168,7 +162,7 @@ with col3:
     )
 
 
-with col4:
+with col3:
     end_date = st.date_input(
         "Fim",
         value=hoje,
@@ -434,9 +428,7 @@ except (ProviderError, CashinhoError) as exc:
 # SERIE VALIDADA
 # ============================================================
 
-series = result.usable_series
-
-if series is None:
+if result.blocked:
     st.divider()
 
     with st.expander(
@@ -449,6 +441,8 @@ if series is None:
         )
 
     st.stop()
+
+series = result.series
 
 
 # ============================================================
@@ -483,6 +477,75 @@ signal = evaluate_entry_signal(
     signal_panel,
 )
 
+# Toda a complexidade técnica converge em uma oportunidade e, depois, em uma
+# decisão binária. A UI não interpreta regras individuais.
+series_by_timeframe = {timeframe: closed_series}
+raw_series_by_timeframe = {timeframe: series}
+quality_statuses = [result.report.status]
+for context_timeframe in available:
+    if context_timeframe is timeframe:
+        continue
+    context_result = load_market_data(
+        provider,
+        symbol=symbol,
+        timeframe=context_timeframe,
+        start=start,
+        end=end,
+        clock=clock,
+        mode=INSPECTION_MODE,
+    )
+    quality_statuses.append(context_result.report.status)
+    if context_result.usable_series is not None:
+        series_by_timeframe[context_timeframe] = context_result.usable_series
+        raw_series_by_timeframe[context_timeframe] = context_result.series
+
+timeframe_analyses = analyze_timeframes(series_by_timeframe, selection)
+timeframe_advice = advise_timeframe(timeframe_analyses)
+selected_analysis = (
+    timeframe_analyses.get(timeframe_advice.recommended_timeframe)
+    if timeframe_advice.recommended_timeframe
+    else None
+)
+if selected_analysis is not None:
+    signal = selected_analysis.signal
+
+risk_approved = False
+if signal.entry is not None and signal.stop is not None and not profile_base.kill_switch_active:
+    try:
+        calculate_ticket_sizing(entry=signal.entry, stop=signal.stop, profile=profile_base)
+        risk_approved = True
+    except ValueError:
+        pass
+
+data_status = (
+    DataStatus.BLOCKED
+    if DataStatus.BLOCKED in quality_statuses
+    else DataStatus.DEGRADED
+    if DataStatus.DEGRADED in quality_statuses
+    else DataStatus.OK
+)
+opportunity = build_opportunity(
+    symbol=symbol,
+    advice=timeframe_advice,
+    analyses=timeframe_analyses,
+    data_status=data_status,
+    risk_approved=risk_approved,
+    timestamp=result.report.checked_at,
+)
+decision = make_final_decision(
+    opportunity,
+    data_quality_approved=data_status is not DataStatus.BLOCKED,
+    risk_approved=risk_approved,
+    candles_closed=not closed_series.has_open_candle,
+    minimum_risk_reward=profile_base.min_risk_reward,
+)
+
+if decision.timeframe is not None and decision.timeframe in raw_series_by_timeframe:
+    timeframe = decision.timeframe
+    series = raw_series_by_timeframe[timeframe]
+    panel = compute_panel(series, selection)
+    closed_series = series.closed_only()
+
 last_closed = closed_series.last
 if last_closed is not None:
     paper_broker.process_candle(last_closed, symbol=symbol, timeframe=timeframe.value)
@@ -493,105 +556,50 @@ if last_closed is not None:
 # ============================================================
 
 st.divider()
+last_price = series.last.close if series.last else None
+top_symbol, top_price, top_timeframe, top_feed = st.columns(4)
+top_symbol.metric("Ativo", symbol)
+top_price.metric("Preço atual", f"R$ {last_price:.2f}" if last_price is not None else "—")
+top_timeframe.metric("Timeframe sugerido", decision.timeframe.value if decision.timeframe else "—")
+top_feed.metric("Status do feed", "MT5" if choice.is_metatrader else "HISTÓRICO")
 
-st.markdown("## Oportunidade atual")
-
-
-if signal.side == "BUY":
-    direction = "COMPRA"
-    direction_icon = "🟢"
-
-elif signal.side == "SELL":
-    direction = "VENDA"
-    direction_icon = "🔴"
-
+st.markdown("## Decisão")
+if decision.should_enter:
+    side_label = "COMPRA" if decision.side == "BUY" else "VENDA"
+    st.success(f"## 🟢 ENTRADA LIBERADA\n### {side_label}")
+    entry_col, stop_col, target_col, rr_col = st.columns(4)
+    entry_col.metric("Entrada", f"R$ {decision.entry:.2f}")
+    stop_col.metric("Stop", f"R$ {decision.stop:.2f}")
+    target_col.metric("Alvo", f"R$ {decision.target:.2f}")
+    rr_col.metric("R:R", f"{decision.risk_reward:.2f}")
+    st.metric("Confiança da oportunidade", f"{decision.confidence}/100")
 else:
-    direction = "SEM DIREÇÃO"
-    direction_icon = "⚪"
+    st.info("## ⚪ NÃO ENTRAR\nNão há uma entrada válida neste momento.")
+    st.metric("Confiança da oportunidade", f"{decision.confidence}/100")
+    st.write(f"**Principal motivo:** {decision.primary_reason}")
+
+with st.expander("Por que essa decisão?"):
+    for reason in decision.reasons:
+        st.write(f"• {reason}")
+
+st.caption("Análise e execução exclusivamente PAPER.")
 
 
-# ------------------------------------------------------------
-# STATUS PRINCIPAL
-# ------------------------------------------------------------
+# ============================================================
+# GRAFICO
+# ============================================================
 
-if signal.status == "ENTRADA LIBERADA":
-    if signal.side == "BUY":
-        st.success(f"🟢 **COMPRA LIBERADA** · Score {signal.score}/100")
-
-    elif signal.side == "SELL":
-        st.error(f"🔴 **VENDA LIBERADA** · Score {signal.score}/100")
-
-elif signal.status == "AGUARDANDO GATILHO":
-    st.warning(f"🟡 **AGUARDANDO GATILHO** · {direction} · Score {signal.score}/100")
-
-else:
-    st.info(f"⚪ **NÃO OPERAR** · Score {signal.score}/100")
-
-
-# ------------------------------------------------------------
-# RESUMO DO SINAL
-# ------------------------------------------------------------
-
-col_dir, col_score, col_trigger = st.columns([2, 1, 1])
-
-col_dir.metric(
-    "Direção",
-    f"{direction_icon} {direction}",
+st.divider()
+st.subheader(f"📈 {symbol} · {timeframe.value}")
+st.plotly_chart(
+    candlestick_figure(
+        series,
+        display_timezone=settings.display_timezone,
+        panel=panel,
+        show_volume=mostrar_volume,
+    ),
+    use_container_width=True,
 )
-
-col_score.metric(
-    "Score de confluência",
-    f"{signal.score}/100",
-)
-
-col_trigger.metric(
-    "Estado do gatilho",
-    "CONFIRMADO" if signal.trigger_confirmed else "AGUARDANDO",
-)
-
-
-# ------------------------------------------------------------
-# ENTRADA / STOP / ALVO
-# ------------------------------------------------------------
-
-if signal.entry is not None and signal.stop is not None and signal.target is not None:
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric(
-        "Entrada",
-        f"R$ {signal.entry:.2f}",
-    )
-
-    col2.metric(
-        "Stop",
-        f"R$ {signal.stop:.2f}",
-    )
-
-    col3.metric(
-        "Alvo",
-        f"R$ {signal.target:.2f}",
-    )
-
-    col4.metric(
-        "R:R",
-        (f"{signal.risk_reward:.1f}" if signal.risk_reward is not None else "—"),
-    )
-
-
-# ------------------------------------------------------------
-# MOTIVOS
-# ------------------------------------------------------------
-
-if signal.reasons:
-    with st.expander(
-        "🔎 Por que este sinal?",
-        expanded=False,
-    ):
-        for reason in signal.reasons:
-            st.write(f"✓ {reason}")
-
-
-st.caption("Sinal experimental em modo PAPER. Nenhuma ordem é enviada ao MetaTrader.")
 
 
 # ============================================================
@@ -601,19 +609,26 @@ st.caption("Sinal experimental em modo PAPER. Nenhuma ordem é enviada ao MetaTr
 st.divider()
 
 
-boleta_disponivel = (
-    signal.status == "ENTRADA LIBERADA"
-    and signal.side in {"BUY", "SELL"}
-    and signal.entry is not None
-    and signal.stop is not None
-    and signal.target is not None
+entrada_liberada = (
+    decision.should_enter
+    and decision.side in {"BUY", "SELL"}
+    and decision.entry is not None
+    and decision.stop is not None
+    and decision.target is not None
 )
+
+if entrada_liberada and st.button("ABRIR BOLETA PAPER", type="primary"):
+    st.session_state["paper_ticket_open"] = True
+
+boleta_disponivel = entrada_liberada and st.session_state.get("paper_ticket_open", False)
 
 
 if not boleta_disponivel:
     st.markdown("## Boleta PAPER")
-
-    st.info("🔒 A boleta será liberada automaticamente quando houver **ENTRADA LIBERADA**.")
+    if entrada_liberada:
+        st.info("Clique em **ABRIR BOLETA PAPER** para preparar a simulação.")
+    else:
+        st.info("A boleta PAPER fica disponível somente quando a entrada é liberada.")
 
 
 else:
@@ -621,7 +636,7 @@ else:
 
     st.markdown(f"## Boleta PAPER — {symbol}")
 
-    st.caption(f"Sinal atual: **{lado_sinal}** · Score {signal.score}/100 · simulação local")
+    st.caption(f"Decisão atual: **{lado_sinal}** · Confiança {decision.confidence}/100 · PAPER")
 
     # ========================================================
     # CAPITAL E RISCO
@@ -1116,24 +1131,23 @@ else:
 st.divider()
 render_paper_orders(paper_broker)
 
-
-# ============================================================
-# GRAFICO
-# ============================================================
-
-st.divider()
-
-st.subheader(f"📈 {symbol} · {timeframe.value}")
-
-st.plotly_chart(
-    candlestick_figure(
-        series,
-        display_timezone=settings.display_timezone,
-        panel=panel,
-        show_volume=mostrar_volume,
-    ),
-    use_container_width=True,
-)
+with st.expander("Multi-timeframe", expanded=False):
+    st.write(
+        "Timeframes de contexto:",
+        ", ".join(tf.value for tf in timeframe_advice.context_timeframes) or "—",
+    )
+    st.write(
+        "Timeframe operacional:",
+        timeframe_advice.recommended_timeframe.value
+        if timeframe_advice.recommended_timeframe
+        else "—",
+    )
+    st.write(
+        "Timeframe de gatilho:",
+        timeframe_advice.trigger_timeframe.value if timeframe_advice.trigger_timeframe else "—",
+    )
+    for reason in timeframe_advice.reasons:
+        st.write(f"• {reason}")
 
 
 # ============================================================
