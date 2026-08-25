@@ -14,9 +14,9 @@ Nenhuma ordem real e enviada ao mercado.
 
 from __future__ import annotations
 
+import time as time_module
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
-import time as time_module
 
 import streamlit as st
 
@@ -24,7 +24,6 @@ from app.components.charts import candlestick_figure
 from app.components.chrome import page_header, sidebar
 from app.components.feed import render_feed_status, render_source_banner
 from app.components.quality import quality_panel
-
 from cashinho.adapters.providers.csv_provider import ProviderError
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
@@ -32,15 +31,14 @@ from cashinho.core.time.clocks import SystemClock
 from cashinho.domain.enums import Mode
 from cashinho.domain.errors import CashinhoError
 from cashinho.domain.risk import RiskProfile
-
 from cashinho.pipeline.entry_signal import evaluate_entry_signal
 from cashinho.pipeline.indicators import IndicatorSelection, compute_panel
 from cashinho.pipeline.market_data import load_market_data
+from cashinho.pipeline.paper_broker import JsonPaperOrderRepository, PaperBroker, PaperOrderType
 from cashinho.pipeline.paper_ticket import (
     build_paper_ticket,
     calculate_ticket_sizing,
 )
-
 
 INSPECTION_MODE = Mode.RESEARCH
 
@@ -82,21 +80,15 @@ if "paper_orders" not in st.session_state:
     st.session_state.paper_orders = []
 
 if "capital_operacional" not in st.session_state:
-    st.session_state.capital_operacional = float(
-        settings.capital
-    )
+    st.session_state.capital_operacional = float(settings.capital)
 
 profile_base = settings.risk_profile()
 
 if "risco_por_operacao_pct" not in st.session_state:
-    st.session_state.risco_por_operacao_pct = float(
-        profile_base.risk_per_trade_pct
-    )
+    st.session_state.risco_por_operacao_pct = float(profile_base.risk_per_trade_pct)
 
 if "exposicao_por_ativo_pct" not in st.session_state:
-    st.session_state.exposicao_por_ativo_pct = float(
-        profile_base.max_exposure_per_symbol_pct
-    )
+    st.session_state.exposicao_por_ativo_pct = float(profile_base.max_exposure_per_symbol_pct)
 
 
 # ============================================================
@@ -106,7 +98,6 @@ if "exposicao_por_ativo_pct" not in st.session_state:
 symbols = choice.offered_symbols()
 
 if not symbols:
-
     st.error(
         "Nenhum dado disponível. Gere as séries de desenvolvimento com:\n\n"
         "```\npython scripts/generate_fixtures.py\n```",
@@ -120,7 +111,6 @@ render_source_banner(choice)
 
 
 if settings.mode.requires_realtime_data and not choice.realtime:
-
     st.info(
         f"Modo operacional: **{settings.mode.value}**. "
         f"Esta tela executa **inspeção histórica** "
@@ -134,12 +124,9 @@ if settings.mode.requires_realtime_data and not choice.realtime:
 # ATIVO / TIMEFRAME / PERIODO
 # ============================================================
 
-col1, col2, col3, col4 = st.columns(
-    [1.2, 1, 1, 1]
-)
+col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1])
 
 with col1:
-
     symbol = st.selectbox(
         "Ativo",
         options=symbols,
@@ -148,13 +135,9 @@ with col1:
 
 
 try:
-
-    available = provider.get_available_timeframes(
-        symbol
-    )
+    available = provider.get_available_timeframes(symbol)
 
 except CashinhoError as exc:
-
     st.error(
         f"Sem timeframes disponíveis para {symbol}: {exc}",
         icon="⛔",
@@ -164,7 +147,6 @@ except CashinhoError as exc:
 
 
 with col2:
-
     timeframe = st.selectbox(
         "Timeframe",
         options=available,
@@ -180,7 +162,6 @@ hoje = datetime.now(UTC).date()
 
 
 with col3:
-
     start_date = st.date_input(
         "Início",
         value=hoje - timedelta(days=30),
@@ -189,7 +170,6 @@ with col3:
 
 
 with col4:
-
     end_date = st.date_input(
         "Fim",
         value=hoje,
@@ -198,7 +178,6 @@ with col4:
 
 
 if start_date > end_date:
-
     st.error(
         "A data inicial não pode ser posterior à data final.",
         icon="⛔",
@@ -212,12 +191,10 @@ if start_date > end_date:
 # ============================================================
 
 if choice.is_metatrader:
-
     with st.expander(
         "📡 Feed MetaTrader 5",
         expanded=False,
     ):
-
         render_feed_status(
             choice,
             symbol,
@@ -233,7 +210,6 @@ with st.expander(
     "⚙️ Configuração da estratégia",
     expanded=False,
 ):
-
     st.caption(
         "Os indicadores participam do cálculo do sinal. "
         "A estratégia combina múltiplas condições antes de "
@@ -247,7 +223,6 @@ with st.expander(
     # --------------------------------------------------------
 
     with ind1:
-
         st.markdown("**Sobre o preço**")
 
         usar_sma = st.checkbox(
@@ -279,7 +254,6 @@ with st.expander(
     # --------------------------------------------------------
 
     with ind2:
-
         st.markdown("**Referências**")
 
         usar_vwap = st.checkbox(
@@ -289,10 +263,7 @@ with st.expander(
         )
 
         if not timeframe.is_intraday:
-
-            st.caption(
-                "VWAP é intradiário."
-            )
+            st.caption("VWAP é intradiário.")
 
         usar_bb = st.checkbox(
             "Bandas de Bollinger",
@@ -321,7 +292,6 @@ with st.expander(
     # --------------------------------------------------------
 
     with ind3:
-
         st.markdown("**Osciladores**")
 
         usar_rsi = st.checkbox(
@@ -366,39 +336,14 @@ with st.expander(
 # ============================================================
 
 selection = IndicatorSelection(
-    sma_periods=(
-        tuple(sma_periods)
-        if usar_sma
-        else ()
-    ),
-    ema_periods=(
-        tuple(ema_periods)
-        if usar_ema
-        else ()
-    ),
-    vwap=(
-        usar_vwap
-        and timeframe.is_intraday
-    ),
-    bollinger_period=(
-        int(bb_period)
-        if usar_bb
-        else None
-    ),
-    bollinger_deviations=float(
-        bb_dev
-    ),
-    rsi_period=(
-        int(rsi_period)
-        if usar_rsi
-        else None
-    ),
+    sma_periods=(tuple(sma_periods) if usar_sma else ()),
+    ema_periods=(tuple(ema_periods) if usar_ema else ()),
+    vwap=(usar_vwap and timeframe.is_intraday),
+    bollinger_period=(int(bb_period) if usar_bb else None),
+    bollinger_deviations=float(bb_dev),
+    rsi_period=(int(rsi_period) if usar_rsi else None),
     macd=usar_macd,
-    atr_period=(
-        int(atr_period)
-        if usar_atr
-        else None
-    ),
+    atr_period=(int(atr_period) if usar_atr else None),
 )
 
 
@@ -408,63 +353,44 @@ selection = IndicatorSelection(
 
 st.divider()
 
-status_col, acao_col = st.columns(
-    [3, 1]
-)
+status_col, acao_col = st.columns([3, 1])
 
 
 with status_col:
-
     if st.session_state.monitorando:
-
-        st.success(
-            f"🟢 AO VIVO · {symbol} · "
-            f"atualização a cada "
-            f"{settings.mt5_refresh_seconds}s"
-        )
+        st.success(f"🟢 AO VIVO · {symbol} · atualização a cada {settings.mt5_refresh_seconds}s")
 
     else:
-
-        st.info(
-            f"⚪ Monitoramento parado · {symbol}"
-        )
+        st.info(f"⚪ Monitoramento parado · {symbol}")
 
 
 with acao_col:
-
     if st.session_state.monitorando:
-
         if st.button(
             "■ Parar",
             use_container_width=True,
             key="stop_monitoring",
         ):
-
             st.session_state.monitorando = False
             st.rerun()
 
     else:
-
         if st.button(
             "▶ Iniciar",
             type="primary",
             use_container_width=True,
             key="start_monitoring",
         ):
-
             st.session_state.monitorando = True
             st.rerun()
 
 
 if not st.session_state.monitorando:
-
     if st.session_state.paper_orders:
-
         with st.expander(
             "Ordens PAPER da sessão",
             expanded=False,
         ):
-
             st.dataframe(
                 st.session_state.paper_orders,
                 use_container_width=True,
@@ -484,14 +410,11 @@ start = datetime.combine(
     tzinfo=UTC,
 )
 
-end = (
-    datetime.combine(
-        end_date,
-        time.min,
-        tzinfo=UTC,
-    )
-    + timedelta(days=1)
-)
+end = datetime.combine(
+    end_date,
+    time.min,
+    tzinfo=UTC,
+) + timedelta(days=1)
 
 
 # ============================================================
@@ -499,7 +422,6 @@ end = (
 # ============================================================
 
 try:
-
     result = load_market_data(
         provider,
         symbol=symbol,
@@ -511,7 +433,6 @@ try:
     )
 
 except (ProviderError, CashinhoError) as exc:
-
     st.error(
         f"Falha ao carregar dados: {exc}",
         icon="⛔",
@@ -527,14 +448,12 @@ except (ProviderError, CashinhoError) as exc:
 series = result.usable_series
 
 if series is None:
-
     st.divider()
 
     with st.expander(
         "⚠️ Qualidade dos dados",
         expanded=True,
     ):
-
         quality_panel(
             result.report,
             rejection_reason=result.rejection_reason,
@@ -554,14 +473,11 @@ panel = compute_panel(
 
 
 if panel.failures:
-
     with st.expander(
         "⚠️ Avisos dos indicadores",
         expanded=False,
     ):
-
         for label, motivo in panel.failures.items():
-
             st.warning(
                 f"**{label}** não calculado — {motivo}",
                 icon="⚠️",
@@ -588,17 +504,14 @@ st.markdown("## Oportunidade atual")
 
 
 if signal.side == "BUY":
-
     direction = "COMPRA"
     direction_icon = "🟢"
 
 elif signal.side == "SELL":
-
     direction = "VENDA"
     direction_icon = "🔴"
 
 else:
-
     direction = "SEM DIREÇÃO"
     direction_icon = "⚪"
 
@@ -608,44 +521,24 @@ else:
 # ------------------------------------------------------------
 
 if signal.status == "ENTRADA LIBERADA":
-
     if signal.side == "BUY":
-
-        st.success(
-            f"🟢 **COMPRA LIBERADA** · "
-            f"Score {signal.score}/100"
-        )
+        st.success(f"🟢 **COMPRA LIBERADA** · Score {signal.score}/100")
 
     elif signal.side == "SELL":
-
-        st.error(
-            f"🔴 **VENDA LIBERADA** · "
-            f"Score {signal.score}/100"
-        )
+        st.error(f"🔴 **VENDA LIBERADA** · Score {signal.score}/100")
 
 elif signal.status == "AGUARDANDO GATILHO":
-
-    st.warning(
-        f"🟡 **AGUARDANDO GATILHO** · "
-        f"{direction} · "
-        f"Score {signal.score}/100"
-    )
+    st.warning(f"🟡 **AGUARDANDO GATILHO** · {direction} · Score {signal.score}/100")
 
 else:
-
-    st.info(
-        f"⚪ **NÃO OPERAR** · "
-        f"Score {signal.score}/100"
-    )
+    st.info(f"⚪ **NÃO OPERAR** · Score {signal.score}/100")
 
 
 # ------------------------------------------------------------
 # RESUMO DO SINAL
 # ------------------------------------------------------------
 
-col_dir, col_score = st.columns(
-    [2, 1]
-)
+col_dir, col_score = st.columns([2, 1])
 
 col_dir.metric(
     "Direção",
@@ -653,7 +546,7 @@ col_dir.metric(
 )
 
 col_score.metric(
-    "Score",
+    "Score de confluência",
     f"{signal.score}/100",
 )
 
@@ -662,12 +555,7 @@ col_score.metric(
 # ENTRADA / STOP / ALVO
 # ------------------------------------------------------------
 
-if (
-    signal.entry is not None
-    and signal.stop is not None
-    and signal.target is not None
-):
-
+if signal.entry is not None and signal.stop is not None and signal.target is not None:
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric(
@@ -687,11 +575,7 @@ if (
 
     col4.metric(
         "R:R",
-        (
-            f"{signal.risk_reward:.1f}"
-            if signal.risk_reward is not None
-            else "—"
-        ),
+        (f"{signal.risk_reward:.1f}" if signal.risk_reward is not None else "—"),
     )
 
 
@@ -700,23 +584,15 @@ if (
 # ------------------------------------------------------------
 
 if signal.reasons:
-
     with st.expander(
         "🔎 Por que este sinal?",
         expanded=False,
     ):
-
         for reason in signal.reasons:
-
-            st.write(
-                f"✓ {reason}"
-            )
+            st.write(f"✓ {reason}")
 
 
-st.caption(
-    "Sinal experimental em modo PAPER. "
-    "Nenhuma ordem é enviada ao MetaTrader."
-)
+st.caption("Sinal experimental em modo PAPER. Nenhuma ordem é enviada ao MetaTrader.")
 
 
 # ============================================================
@@ -736,33 +612,17 @@ boleta_disponivel = (
 
 
 if not boleta_disponivel:
-
     st.markdown("## Boleta PAPER")
 
-    st.info(
-        "🔒 A boleta será liberada automaticamente "
-        "quando houver **ENTRADA LIBERADA**."
-    )
+    st.info("🔒 A boleta será liberada automaticamente quando houver **ENTRADA LIBERADA**.")
 
 
 else:
+    lado_sinal = "COMPRA" if signal.side == "BUY" else "VENDA"
 
-    lado_sinal = (
-        "COMPRA"
-        if signal.side == "BUY"
-        else "VENDA"
-    )
+    st.markdown(f"## Boleta PAPER — {symbol}")
 
-    st.markdown(
-        f"## Boleta PAPER — {symbol}"
-    )
-
-    st.caption(
-        f"Sinal atual: **{lado_sinal}** · "
-        f"Score {signal.score}/100 · "
-        "simulação local"
-    )
-
+    st.caption(f"Sinal atual: **{lado_sinal}** · Score {signal.score}/100 · simulação local")
 
     # ========================================================
     # CAPITAL E RISCO
@@ -772,106 +632,60 @@ else:
         "💰 Capital e limites de risco",
         expanded=True,
     ):
-
-        col_capital, col_risco, col_exposicao = st.columns(
-            3
-        )
-
+        col_capital, col_risco, col_exposicao = st.columns(3)
 
         with col_capital:
-
             capital_operacional = st.number_input(
                 "Capital disponível (R$)",
                 min_value=1.00,
-                value=float(
-                    st.session_state.capital_operacional
-                ),
+                value=float(st.session_state.capital_operacional),
                 step=100.00,
                 format="%.2f",
                 key="boleta_capital",
             )
 
-
         with col_risco:
-
             risco_por_operacao_pct = st.number_input(
                 "Risco por operação (%)",
                 min_value=0.01,
                 max_value=100.00,
-                value=float(
-                    st.session_state.risco_por_operacao_pct
-                ),
+                value=float(st.session_state.risco_por_operacao_pct),
                 step=0.10,
                 format="%.2f",
                 key="boleta_risco_pct",
             )
 
-
         with col_exposicao:
-
             exposicao_por_ativo_pct = st.number_input(
                 "Exposição máx. por ativo (%)",
                 min_value=0.01,
                 max_value=100.00,
-                value=float(
-                    st.session_state.exposicao_por_ativo_pct
-                ),
+                value=float(st.session_state.exposicao_por_ativo_pct),
                 step=1.00,
                 format="%.2f",
                 key="boleta_exposicao_pct",
             )
 
+        st.session_state.capital_operacional = capital_operacional
 
-        st.session_state.capital_operacional = (
-            capital_operacional
-        )
+        st.session_state.risco_por_operacao_pct = risco_por_operacao_pct
 
-        st.session_state.risco_por_operacao_pct = (
-            risco_por_operacao_pct
-        )
-
-        st.session_state.exposicao_por_ativo_pct = (
-            exposicao_por_ativo_pct
-        )
-
+        st.session_state.exposicao_por_ativo_pct = exposicao_por_ativo_pct
 
         profile = RiskProfile(
             name="boleta",
-            capital=Decimal(
-                str(capital_operacional)
-            ),
-            risk_per_trade_pct=Decimal(
-                str(risco_por_operacao_pct)
-            ),
-            max_daily_loss_pct=(
-                profile_base.max_daily_loss_pct
-            ),
-            max_drawdown_pct=(
-                profile_base.max_drawdown_pct
-            ),
-            max_exposure_pct=(
-                profile_base.max_exposure_pct
-            ),
-            max_exposure_per_symbol_pct=Decimal(
-                str(exposicao_por_ativo_pct)
-            ),
-            max_trades_per_day=(
-                profile_base.max_trades_per_day
-            ),
-            max_consecutive_losses=(
-                profile_base.max_consecutive_losses
-            ),
-            max_open_positions=(
-                profile_base.max_open_positions
-            ),
-            min_risk_reward=(
-                profile_base.min_risk_reward
-            ),
-            kill_switch_active=(
-                profile_base.kill_switch_active
-            ),
+            capital=Decimal(str(capital_operacional)),
+            risk_per_trade_pct=Decimal(str(risco_por_operacao_pct)),
+            max_daily_loss_pct=(profile_base.max_daily_loss_pct),
+            max_drawdown_pct=(profile_base.max_drawdown_pct),
+            max_exposure_pct=(profile_base.max_exposure_pct),
+            max_exposure_per_symbol_pct=Decimal(str(exposicao_por_ativo_pct)),
+            max_trades_per_day=(profile_base.max_trades_per_day),
+            max_consecutive_losses=(profile_base.max_consecutive_losses),
+            max_open_positions=(profile_base.max_open_positions),
+            min_risk_reward=(profile_base.min_risk_reward),
+            kill_switch_active=(profile_base.kill_switch_active),
         )
-
 
         risco_maximo_reais = (
             Decimal(str(capital_operacional))
@@ -885,7 +699,6 @@ else:
             / Decimal("100")
         )
 
-
         r1, r2 = st.columns(2)
 
         r1.metric(
@@ -898,16 +711,11 @@ else:
             f"R$ {exposicao_maxima_reais:,.2f}",
         )
 
-
     # ========================================================
     # TIPO DA ORDEM
     # ========================================================
 
-    tipo_padrao = (
-        "Compra"
-        if signal.side == "BUY"
-        else "Venda"
-    )
+    tipo_padrao = "Compra" if signal.side == "BUY" else "Venda"
 
     tipos_ordem = [
         "Compra",
@@ -919,22 +727,17 @@ else:
     tipo_ordem = st.radio(
         "Tipo da ordem",
         options=tipos_ordem,
-        index=tipos_ordem.index(
-            tipo_padrao
-        ),
+        index=tipos_ordem.index(tipo_padrao),
         horizontal=True,
         key="paper_order_type",
     )
-
 
     ordem_stop = tipo_ordem in {
         "Compra Stop",
         "Venda Stop",
     }
 
-
     if ordem_stop:
-
         st.warning(
             "Compra Stop e Venda Stop aparecem para "
             "preparar a interface, mas ainda não estão "
@@ -942,18 +745,7 @@ else:
             icon="🟡",
         )
 
-
-    if tipo_ordem in {
-        "Compra",
-        "Compra Stop",
-    }:
-
-        lado_boleta = "BUY"
-
-    else:
-
-        lado_boleta = "SELL"
-
+    lado_boleta = "BUY" if tipo_ordem in {"Compra", "Compra Stop"} else "SELL"
 
     # ========================================================
     # VALIDADE
@@ -961,9 +753,7 @@ else:
 
     col_validade, col_data = st.columns(2)
 
-
     with col_validade:
-
         validade = st.selectbox(
             "Validade",
             options=[
@@ -974,11 +764,8 @@ else:
             key="paper_validity",
         )
 
-
     with col_data:
-
         if validade == "Hoje":
-
             data_validade = st.date_input(
                 "Data Validade",
                 value=hoje,
@@ -987,7 +774,6 @@ else:
             )
 
         else:
-
             data_validade = st.date_input(
                 "Data Validade",
                 value=hoje,
@@ -995,27 +781,20 @@ else:
                 key="paper_validity_date",
             )
 
-
     # ========================================================
     # PRECO
     # ========================================================
 
-    col_preco, col_mercado = st.columns(
-        [2, 1]
-    )
-
+    col_preco, col_mercado = st.columns([2, 1])
 
     with col_mercado:
-
         a_mercado = st.checkbox(
             "A Mercado",
             value=False,
             key="paper_market_order",
         )
 
-
     with col_preco:
-
         preco_ordem = st.number_input(
             "Preço",
             min_value=0.01,
@@ -1025,7 +804,6 @@ else:
             disabled=a_mercado,
             key=f"paper_price_{symbol}",
         )
-
 
     # ========================================================
     # OCO
@@ -1039,12 +817,9 @@ else:
         key="paper_oco",
     )
 
-
     col_gain, col_loss, col_offset = st.columns(3)
 
-
     with col_gain:
-
         gain = st.number_input(
             "Gain",
             min_value=0.01,
@@ -1055,9 +830,7 @@ else:
             key=f"paper_gain_{symbol}",
         )
 
-
     with col_loss:
-
         loss = st.number_input(
             "Loss",
             min_value=0.01,
@@ -1068,9 +841,7 @@ else:
             key=f"paper_loss_{symbol}",
         )
 
-
     with col_offset:
-
         offset = st.number_input(
             "Offset",
             min_value=0.00,
@@ -1081,63 +852,35 @@ else:
             key=f"paper_offset_{symbol}",
         )
 
-
     # ========================================================
     # CONVERSAO DOS VALORES DA BOLETA
     # ========================================================
 
-    preco_decimal = Decimal(
-        str(preco_ordem)
-    )
+    preco_decimal = Decimal(str(preco_ordem))
 
-    gain_decimal = Decimal(
-        str(gain)
-    )
+    gain_decimal = Decimal(str(gain))
 
-    loss_decimal = Decimal(
-        str(loss)
-    )
-
+    loss_decimal = Decimal(str(loss))
 
     # ========================================================
     # VALIDACAO DA GEOMETRIA DA ORDEM
     # ========================================================
 
     if lado_boleta == "BUY":
-
-        estrutura_preco_valida = (
-            loss_decimal < preco_decimal
-            and gain_decimal > preco_decimal
-        )
+        estrutura_preco_valida = loss_decimal < preco_decimal and gain_decimal > preco_decimal
 
     else:
+        estrutura_preco_valida = loss_decimal > preco_decimal and gain_decimal < preco_decimal
 
-        estrutura_preco_valida = (
-            loss_decimal > preco_decimal
-            and gain_decimal < preco_decimal
-        )
+    risco_por_acao_manual = abs(preco_decimal - loss_decimal)
 
-
-    risco_por_acao_manual = abs(
-        preco_decimal - loss_decimal
-    )
-
-    retorno_por_acao_manual = abs(
-        gain_decimal - preco_decimal
-    )
-
+    retorno_por_acao_manual = abs(gain_decimal - preco_decimal)
 
     if risco_por_acao_manual > 0:
-
-        rr_manual = (
-            retorno_por_acao_manual
-            / risco_por_acao_manual
-        )
+        rr_manual = retorno_por_acao_manual / risco_por_acao_manual
 
     else:
-
         rr_manual = Decimal("0")
-
 
     # ========================================================
     # DIMENSIONAMENTO
@@ -1146,9 +889,7 @@ else:
     sizing = None
 
     if estrutura_preco_valida:
-
         try:
-
             sizing = calculate_ticket_sizing(
                 entry=preco_decimal,
                 stop=loss_decimal,
@@ -1157,27 +898,19 @@ else:
             )
 
         except ValueError as exc:
-
             st.error(
-                f"Boleta bloqueada pelo Risk Manager: "
-                f"{exc}",
+                f"Boleta bloqueada pelo Risk Manager: {exc}",
                 icon="⛔",
             )
 
-
     if sizing is not None:
-
         # ====================================================
         # ATIVO / QUANTIDADE / TOTAL
         # ====================================================
 
-        col_ativo, col_qtd, col_total = st.columns(
-            [1.3, 1, 1]
-        )
-
+        col_ativo, col_qtd, col_total = st.columns([1.3, 1, 1])
 
         with col_ativo:
-
             st.text_input(
                 "Ativo",
                 value=symbol,
@@ -1185,20 +918,15 @@ else:
                 key="paper_symbol",
             )
 
+        qty_key = f"paper_qty_{symbol}_{timeframe.value}"
 
-        qty_key = (
-            f"paper_qty_{symbol}_{timeframe.value}"
+        # O Risk Manager e a autoridade: toda reexecucao recalcula e ajusta
+        # o valor do widget quando capital, risco, exposicao, preco ou stop mudam.
+        st.session_state[qty_key] = min(
+            int(st.session_state.get(qty_key, sizing.quantity)), sizing.quantity
         )
 
-        if qty_key not in st.session_state:
-
-            st.session_state[qty_key] = int(
-                sizing.quantity
-            )
-
-
         with col_qtd:
-
             quantidade = st.number_input(
                 "Quantidade",
                 min_value=1,
@@ -1206,45 +934,25 @@ else:
                 key=qty_key,
             )
 
+        quantidade = int(quantidade)
 
-        quantidade = int(
-            quantidade
-        )
-
-
-        total_operacao = (
-            preco_decimal
-            * Decimal(quantidade)
-        )
-
+        total_operacao = preco_decimal * Decimal(quantidade)
 
         with col_total:
-
             st.metric(
                 "Total",
                 f"R$ {total_operacao:,.2f}",
             )
 
-
         # ====================================================
         # CONTROLE DE RISCO
         # ====================================================
 
-        risco_ordem = (
-            risco_por_acao_manual
-            * Decimal(quantidade)
-        )
+        risco_ordem = risco_por_acao_manual * Decimal(quantidade)
 
-        exposicao_ordem = (
-            preco_decimal
-            * Decimal(quantidade)
-        )
+        exposicao_ordem = preco_decimal * Decimal(quantidade)
 
-
-        st.markdown(
-            "### Controle de risco"
-        )
-
+        st.markdown("### Controle de risco")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1268,7 +976,6 @@ else:
             f"{rr_manual:.2f}",
         )
 
-
         st.caption(
             f"Quantidade recomendada: "
             f"**{sizing.quantity} ações** · "
@@ -1276,33 +983,21 @@ else:
             f"`{sizing.limiting_constraint}`"
         )
 
-
         # ====================================================
         # VALIDACOES
         # ====================================================
 
-        quantidade_valida = (
-            quantidade <= sizing.quantity
-        )
+        quantidade_valida = quantidade <= sizing.quantity
 
-        rr_valido = (
-            rr_manual
-            >= profile.min_risk_reward
-        )
+        rr_valido = rr_manual >= profile.min_risk_reward
 
-        direcao_valida = (
-            lado_boleta == signal.side
-        )
+        direcao_valida = lado_boleta == signal.side
 
-        kill_switch_ok = (
-            not profile.kill_switch_active
-        )
+        kill_switch_ok = not profile.kill_switch_active
 
         oco_valido = usar_oco
 
-
         if not direcao_valida:
-
             st.error(
                 f"O sinal atual é de **{lado_sinal}**. "
                 "A direção não pode ser invertida "
@@ -1310,18 +1005,13 @@ else:
                 icon="⛔",
             )
 
-
         if not quantidade_valida:
-
             st.error(
-                "Quantidade acima do máximo calculado "
-                "pelo Risk Manager.",
+                "Quantidade acima do máximo calculado pelo Risk Manager.",
                 icon="⛔",
             )
 
-
         if not rr_valido:
-
             st.error(
                 f"R:R atual ({rr_manual:.2f}) está abaixo "
                 f"do mínimo permitido "
@@ -1329,18 +1019,13 @@ else:
                 icon="⛔",
             )
 
-
         if not kill_switch_ok:
-
             st.error(
-                "KILL SWITCH ATIVO — novas operações "
-                "estão bloqueadas.",
+                "KILL SWITCH ATIVO — novas operações estão bloqueadas.",
                 icon="⛔",
             )
 
-
         if not oco_valido:
-
             st.warning(
                 "Nesta versão PAPER, mantenha a estratégia "
                 "OCO ativa para que a posição tenha "
@@ -1348,9 +1033,9 @@ else:
                 icon="⚠️",
             )
 
-
         pode_simular = (
             not ordem_stop
+            and not a_mercado
             and estrutura_preco_valida
             and direcao_valida
             and quantidade_valida
@@ -1359,6 +1044,12 @@ else:
             and oco_valido
         )
 
+        if a_mercado:
+            st.error(
+                "Ordem a mercado PAPER bloqueada: esta tela não possui bid/ask ativo "
+                "e não inventa preço de execução.",
+                icon="⛔",
+            )
 
         # ====================================================
         # BOTAO
@@ -1366,13 +1057,7 @@ else:
 
         st.divider()
 
-
-        texto_botao = (
-            "🟢 Simular Compra"
-            if lado_boleta == "BUY"
-            else "🔴 Simular Venda"
-        )
-
+        texto_botao = "🟢 Simular Compra" if lado_boleta == "BUY" else "🔴 Simular Venda"
 
         if st.button(
             texto_botao,
@@ -1381,9 +1066,7 @@ else:
             use_container_width=True,
             key="paper_submit",
         ):
-
             try:
-
                 ticket = build_paper_ticket(
                     symbol=symbol,
                     side=lado_boleta,
@@ -1391,31 +1074,24 @@ else:
                     stop=loss_decimal,
                     target=gain_decimal,
                     quantity=quantidade,
+                    min_risk_reward=profile.min_risk_reward,
+                    maximum_quantity=sizing.quantity,
                 )
 
             except ValueError as exc:
-
                 st.error(
-                    f"Não foi possível criar a ordem PAPER: "
-                    f"{exc}",
+                    f"Não foi possível criar a ordem PAPER: {exc}",
                     icon="⛔",
                 )
 
             else:
-
                 agora = datetime.now(UTC)
 
                 ordem = {
-                    "Data/Hora UTC": agora.strftime(
-                        "%d/%m/%Y %H:%M:%S"
-                    ),
+                    "Data/Hora UTC": agora.strftime("%d/%m/%Y %H:%M:%S"),
                     "Ativo": ticket.symbol,
                     "Tipo": tipo_ordem,
-                    "Lado": (
-                        "COMPRA"
-                        if ticket.side == "BUY"
-                        else "VENDA"
-                    ),
+                    "Lado": ("COMPRA" if ticket.side == "BUY" else "VENDA"),
                     "Quantidade": ticket.quantity,
                     "Preço": float(ticket.entry),
                     "Gain": float(ticket.target),
@@ -1424,48 +1100,33 @@ else:
                     "R:R": float(ticket.risk_reward),
                     "Risco": float(ticket.monetary_risk),
                     "Exposição": float(ticket.notional),
-                    "Capital": float(
-                        capital_operacional
-                    ),
-                    "Validade": str(
-                        data_validade
-                    ),
+                    "Capital": float(capital_operacional),
+                    "Validade": str(data_validade),
                     "Status": "ABERTA",
                 }
 
-
-                st.session_state.paper_orders.append(
-                    ordem
+                broker = PaperBroker(
+                    JsonPaperOrderRepository(settings.data_dir / "paper_orders.json")
                 )
+                broker.register(ticket, PaperOrderType.LIMIT, now=agora)
+                # Espelho apenas para compatibilidade visual; a fonte de verdade
+                # agora e o repositorio proprio do Paper Broker.
+                st.session_state.paper_orders.append(ordem)
 
+                st.success(f"✅ Ordem PAPER de {lado_sinal} registrada: {quantidade} {symbol}.")
 
-                st.success(
-                    f"✅ Ordem PAPER de "
-                    f"{lado_sinal} registrada: "
-                    f"{quantidade} {symbol}."
-                )
-
-                st.caption(
-                    "Nenhuma chamada de order_send() "
-                    "foi realizada."
-                )
-
+                st.caption("Nenhuma chamada de order_send() foi realizada.")
 
     elif not estrutura_preco_valida:
-
         if lado_boleta == "BUY":
-
             st.error(
-                "Para COMPRA: Loss deve ficar abaixo da "
-                "entrada e Gain acima da entrada.",
+                "Para COMPRA: Loss deve ficar abaixo da entrada e Gain acima da entrada.",
                 icon="⛔",
             )
 
         else:
-
             st.error(
-                "Para VENDA: Loss deve ficar acima da "
-                "entrada e Gain abaixo da entrada.",
+                "Para VENDA: Loss deve ficar acima da entrada e Gain abaixo da entrada.",
                 icon="⛔",
             )
 
@@ -1475,15 +1136,12 @@ else:
 # ============================================================
 
 if st.session_state.paper_orders:
-
     st.divider()
 
     with st.expander(
-        f"📋 Ordens PAPER da sessão "
-        f"({len(st.session_state.paper_orders)})",
+        f"📋 Ordens PAPER da sessão ({len(st.session_state.paper_orders)})",
         expanded=False,
     ):
-
         st.dataframe(
             st.session_state.paper_orders,
             use_container_width=True,
@@ -1497,9 +1155,7 @@ if st.session_state.paper_orders:
 
 st.divider()
 
-st.subheader(
-    f"📈 {symbol} · {timeframe.value}"
-)
+st.subheader(f"📈 {symbol} · {timeframe.value}")
 
 st.plotly_chart(
     candlestick_figure(
@@ -1520,7 +1176,6 @@ with st.expander(
     "🩺 Qualidade e origem dos dados",
     expanded=False,
 ):
-
     quality_panel(
         result.report,
         rejection_reason=result.rejection_reason,
@@ -1532,34 +1187,25 @@ with st.expander(
 # ============================================================
 
 if panel.has_content:
-
     with st.expander(
         "📐 Últimos valores dos indicadores",
         expanded=False,
     ):
-
         linhas = []
 
         for label, resultado in {
             **panel.overlays,
             **panel.oscillators,
         }.items():
-
             for coluna, valor in resultado.last().items():
-
                 linhas.append(
                     {
                         "Indicador": label,
                         "Linha": coluna,
-                        "Valor": (
-                            "—"
-                            if valor is None
-                            else f"{valor:,.4f}"
-                        ),
+                        "Valor": ("—" if valor is None else f"{valor:,.4f}"),
                         "Aquecimento": resultado.warmup,
                     }
                 )
-
 
         st.dataframe(
             linhas,
@@ -1575,18 +1221,13 @@ if panel.has_content:
 primeiro = series.candles[0]
 ultimo = series.candles[-1]
 
-variacao = (
-    (ultimo.close - primeiro.open)
-    / primeiro.open
-    * 100
-)
+variacao = (ultimo.close - primeiro.open) / primeiro.open * 100
 
 
 with st.expander(
     "📊 Resumo técnico do período",
     expanded=False,
 ):
-
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric(
@@ -1612,7 +1253,6 @@ with st.expander(
         ),
     )
 
-
     st.caption(
         f"Período efetivo: "
         f"{primeiro.timestamp.astimezone().strftime('%d/%m/%Y %H:%M')} "
@@ -1632,7 +1272,6 @@ with st.expander(
     "🗃️ Dados carregados",
     expanded=False,
 ):
-
     st.dataframe(
         series.to_records()[-200:],
         use_container_width=True,
@@ -1647,9 +1286,6 @@ with st.expander(
 # ============================================================
 
 if st.session_state.monitorando:
-
-    time_module.sleep(
-        settings.mt5_refresh_seconds
-    )
+    time_module.sleep(settings.mt5_refresh_seconds)
 
     st.rerun()

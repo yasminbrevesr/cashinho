@@ -84,6 +84,9 @@ def compute_panel(series: CandleSeries, selection: IndicatorSelection) -> Indica
     Falha de um indicador nao derruba os demais: se a serie tem 30
     candles, a EMA(9) e valida mesmo que o MACD(12,26,9) nao seja.
     """
+    # Indicadores de decisao nunca enxergam o candle em formacao. A UI pode
+    # continuar desenhando ``series`` integralmente no grafico.
+    series = series.closed_only()
     overlays: dict[str, IndicatorResult] = {}
     oscillators: dict[str, IndicatorResult] = {}
     failures: dict[str, str] = {}

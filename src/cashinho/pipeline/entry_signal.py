@@ -17,245 +17,139 @@ class EntrySignal:
     target: Decimal | None
     risk_reward: float | None
     reasons: tuple[str, ...]
+    trigger_confirmed: bool = False
+
+
+def _last(panel: IndicatorPanel, overlay: bool, label: str) -> float | None:
+    result = (panel.overlays if overlay else panel.oscillators).get(label)
+    return next(iter(result.last().values()), None) if result else None
 
 
 def evaluate_entry_signal(
     series: CandleSeries,
     panel: IndicatorPanel,
+    *,
+    minimum_context_score: int = 60,
+    risk_reward: Decimal = Decimal("2"),
 ) -> EntrySignal:
-    """
-    Entry Signal V1.
-
-    Regras simples, deterministicas e explicaveis.
-    Usa somente candles fechados e indicadores ja calculados.
-    Nao envia ordens.
-    """
-
+    """Combina contexto e um gatilho real, sempre sobre candles fechados."""
     candles = series.closed_only()
-
-    if len(candles) < 30:
+    if len(candles) < 30 or candles.last is None:
         return EntrySignal(
-            side="NONE",
-            status="NÃO OPERAR",
-            score=0,
-            entry=None,
-            stop=None,
-            target=None,
-            risk_reward=None,
-            reasons=("Dados insuficientes.",),
+            "NONE", "NÃO OPERAR", 0, None, None, None, None, ("Dados fechados insuficientes.",)
+        )
+    previous, last = candles.candles[-2:]
+    buy_score = sell_score = 0
+    buy: list[str] = []
+    sell: list[str] = []
+
+    ema9, ema21 = _last(panel, True, "EMA(9)"), _last(panel, True, "EMA(21)")
+    if ema9 is not None and ema21 is not None:
+        if ema9 > ema21:
+            buy_score += 25
+            buy.append("EMA 9 acima da EMA 21")
+        elif ema9 < ema21:
+            sell_score += 25
+            sell.append("EMA 9 abaixo da EMA 21")
+    vwap = _last(panel, True, "VWAP")
+    if vwap is not None:
+        if last.close > Decimal(str(vwap)):
+            buy_score += 20
+            buy.append("Preço fechado acima da VWAP")
+        elif last.close < Decimal(str(vwap)):
+            sell_score += 20
+            sell.append("Preço fechado abaixo da VWAP")
+    rsi = _last(panel, False, "RSI(14)")
+    if rsi is not None:
+        if 50 <= rsi <= 70:
+            buy_score += 15
+            buy.append(f"RSI favorável à compra ({rsi:.1f})")
+        elif 30 <= rsi < 50:
+            sell_score += 15
+            sell.append(f"RSI favorável à venda ({rsi:.1f})")
+
+    buy_structure = last.high > previous.high and last.low > previous.low
+    sell_structure = last.high < previous.high and last.low < previous.low
+    if buy_structure:
+        buy_score += 25
+        buy.append("Estrutura de máxima e mínima ascendentes")
+    if sell_structure:
+        sell_score += 25
+        sell.append("Estrutura de máxima e mínima descendentes")
+    volumes = [c.volume for c in candles.candles[-21:-1]]
+    volume_ok = last.volume > sum(volumes) / len(volumes)
+    if volume_ok:
+        buy_score += 15
+        sell_score += 15
+
+    if buy_score == sell_score:
+        return EntrySignal(
+            "NONE",
+            "NÃO OPERAR",
+            0,
+            None,
+            None,
+            None,
+            None,
+            ("Sem vantagem clara entre compra e venda.",),
+        )
+    side = "BUY" if buy_score > sell_score else "SELL"
+    score = min(max(buy_score, sell_score), 100)
+    reasons = buy if side == "BUY" else sell
+    if score < minimum_context_score:
+        return EntrySignal(side, "NÃO OPERAR", score, None, None, None, None, tuple(reasons))
+
+    candle_ok = (
+        last.close > last.open and last.close > previous.high
+        if side == "BUY"
+        else last.close < last.open and last.close < previous.low
+    )
+    trigger = candle_ok and volume_ok and (buy_structure if side == "BUY" else sell_structure)
+    if not trigger:
+        return EntrySignal(
+            side,
+            "AGUARDANDO GATILHO",
+            score,
+            None,
+            None,
+            None,
+            None,
+            (
+                *reasons,
+                "Contexto válido; rompimento, candle, estrutura e volume ainda não confirmados.",
+            ),
         )
 
-    last = candles.last
-    if last is None:
-        return EntrySignal(
-            side="NONE",
-            status="NÃO OPERAR",
-            score=0,
-            entry=None,
-            stop=None,
-            target=None,
-            risk_reward=None,
-            reasons=("Sem candle fechado.",),
-        )
-
-    close = last.close
-    score_buy = 0
-    score_sell = 0
-    buy_reasons: list[str] = []
-    sell_reasons: list[str] = []
-
-    # ---------------------------------------------------------
-    # EMA
-    # ---------------------------------------------------------
-    ema9 = panel.overlays.get("EMA(9)")
-    ema21 = panel.overlays.get("EMA(21)")
-
-    ema9_value = None
-    ema21_value = None
-
-    if ema9 is not None:
-        values = ema9.last()
-        ema9_value = next(iter(values.values()), None)
-
-    if ema21 is not None:
-        values = ema21.last()
-        ema21_value = next(iter(values.values()), None)
-
-    if ema9_value is not None and ema21_value is not None:
-        if ema9_value > ema21_value:
-            score_buy += 20
-            buy_reasons.append("EMA 9 acima da EMA 21")
-        elif ema9_value < ema21_value:
-            score_sell += 20
-            sell_reasons.append("EMA 9 abaixo da EMA 21")
-
-    # ---------------------------------------------------------
-    # VWAP
-    # ---------------------------------------------------------
-    vwap_result = panel.overlays.get("VWAP")
-    if vwap_result is not None:
-        values = vwap_result.last()
-        vwap_value = next(iter(values.values()), None)
-
-        if vwap_value is not None:
-            if close > vwap_value:
-                score_buy += 20
-                buy_reasons.append("Preço acima da VWAP")
-            elif close < vwap_value:
-                score_sell += 20
-                sell_reasons.append("Preço abaixo da VWAP")
-
-    # ---------------------------------------------------------
-    # RSI
-    # ---------------------------------------------------------
-    rsi_result = panel.oscillators.get("RSI(14)")
-    if rsi_result is not None:
-        values = rsi_result.last()
-        rsi_value = next(iter(values.values()), None)
-
-        if rsi_value is not None:
-            if 50 <= rsi_value <= 70:
-                score_buy += 15
-                buy_reasons.append(f"RSI favorável à compra ({rsi_value:.1f})")
-
-            if 30 <= rsi_value <= 50:
-                score_sell += 15
-                sell_reasons.append(f"RSI favorável à venda ({rsi_value:.1f})")
-
-    # ---------------------------------------------------------
-    # Estrutura simples dos últimos candles
-    # ---------------------------------------------------------
-    recent = candles.candles[-4:]
-
-    if len(recent) >= 4:
-        highs = [c.high for c in recent]
-        lows = [c.low for c in recent]
-
-        if highs[-1] > highs[-2] and lows[-1] > lows[-2]:
-            score_buy += 20
-            buy_reasons.append("Estrutura recente de máxima e mínima ascendentes")
-
-        if highs[-1] < highs[-2] and lows[-1] < lows[-2]:
-            score_sell += 20
-            sell_reasons.append("Estrutura recente de máxima e mínima descendentes")
-
-    # ---------------------------------------------------------
-    # Volume
-    # ---------------------------------------------------------
-    recent_volume = [c.volume for c in candles.candles[-20:]]
-
-    if recent_volume:
-        avg_volume = sum(recent_volume[:-1]) / max(len(recent_volume[:-1]), 1)
-
-        if last.volume > avg_volume:
-            score_buy += 10
-            score_sell += 10
-
-            buy_reasons.append("Volume acima da média recente")
-            sell_reasons.append("Volume acima da média recente")
-
-    # ---------------------------------------------------------
-    # Candle de gatilho
-    # ---------------------------------------------------------
-    if last.close > last.open:
-        score_buy += 15
-        buy_reasons.append("Último candle fechado comprador")
-
-    elif last.close < last.open:
-        score_sell += 15
-        sell_reasons.append("Último candle fechado vendedor")
-
-    # ---------------------------------------------------------
-    # Decide lado
-    # ---------------------------------------------------------
-    if score_buy > score_sell:
-        side = "BUY"
-        score = min(score_buy, 100)
-        reasons = tuple(buy_reasons)
-    elif score_sell > score_buy:
-        side = "SELL"
-        score = min(score_sell, 100)
-        reasons = tuple(sell_reasons)
-    else:
-        return EntrySignal(
-            side="NONE",
-            status="NÃO OPERAR",
-            score=0,
-            entry=None,
-            stop=None,
-            target=None,
-            risk_reward=None,
-            reasons=("Sem vantagem clara entre compra e venda.",),
-        )
-
-    # ---------------------------------------------------------
-    # Status
-    # ---------------------------------------------------------
-    if score < 60:
-        return EntrySignal(
-            side=side,
-            status="NÃO OPERAR",
-            score=score,
-            entry=None,
-            stop=None,
-            target=None,
-            risk_reward=None,
-            reasons=reasons,
-        )
-
-    if score < 75:
-        status = "AGUARDANDO GATILHO"
-    else:
-        status = "ENTRADA LIBERADA"
-
-    # ---------------------------------------------------------
-    # Stop e alvo V1
-    # ---------------------------------------------------------
+    entry = last.close
     if side == "BUY":
-        entry = last.high
         stop = min(c.low for c in candles.candles[-5:])
         risk = entry - stop
-
-        if risk <= 0:
-            return EntrySignal(
-                side=side,
-                status="NÃO OPERAR",
-                score=score,
-                entry=None,
-                stop=None,
-                target=None,
-                risk_reward=None,
-                reasons=reasons + ("Stop inválido.",),
-            )
-
-        target = entry + (risk * Decimal("2"))
-
+        target = entry + risk * risk_reward
     else:
-        entry = last.low
         stop = max(c.high for c in candles.candles[-5:])
         risk = stop - entry
-
-        if risk <= 0:
-            return EntrySignal(
-                side=side,
-                status="NÃO OPERAR",
-                score=score,
-                entry=None,
-                stop=None,
-                target=None,
-                risk_reward=None,
-                reasons=reasons + ("Stop inválido.",),
-            )
-
-        target = entry - (risk * Decimal("2"))
-
+        target = entry - risk * risk_reward
+    geometry_ok = risk > 0 and (stop < entry < target if side == "BUY" else target < entry < stop)
+    if not geometry_ok:
+        return EntrySignal(
+            side,
+            "NÃO OPERAR",
+            score,
+            None,
+            None,
+            None,
+            None,
+            (*reasons, "Geometria de stop e alvo inválida."),
+        )
+    reasons.append("Gatilho confirmado por rompimento, candle, estrutura e volume")
     return EntrySignal(
-        side=side,
-        status=status,
-        score=score,
-        entry=entry,
-        stop=stop,
-        target=target,
-        risk_reward=2.0,
-        reasons=reasons,
+        side,
+        "ENTRADA LIBERADA",
+        score,
+        entry,
+        stop,
+        target,
+        float(risk_reward),
+        tuple(reasons),
+        True,
     )
