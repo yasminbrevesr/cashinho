@@ -60,10 +60,17 @@ class PaperOrderRepository:
     def save(self, order: PaperOrder) -> None:
         raise NotImplementedError
 
+    def last_processed(self, key: str) -> datetime | None:
+        raise NotImplementedError
+
+    def mark_processed(self, key: str, close_time: datetime) -> None:
+        raise NotImplementedError
+
 
 class InMemoryPaperOrderRepository(PaperOrderRepository):
     def __init__(self) -> None:
         self._orders: dict[str, PaperOrder] = {}
+        self._processed: dict[str, datetime] = {}
 
     def add(self, order: PaperOrder) -> None:
         self._orders[order.id] = order
@@ -78,6 +85,12 @@ class InMemoryPaperOrderRepository(PaperOrderRepository):
         if order.id not in self._orders:
             raise KeyError(order.id)
         self._orders[order.id] = order
+
+    def last_processed(self, key: str) -> datetime | None:
+        return self._processed.get(key)
+
+    def mark_processed(self, key: str, close_time: datetime) -> None:
+        self._processed[key] = close_time
 
 
 class JsonPaperOrderRepository(InMemoryPaperOrderRepository):
@@ -123,6 +136,13 @@ class JsonPaperOrderRepository(InMemoryPaperOrderRepository):
                     close_reason=raw["close_reason"],
                 )
                 self._orders[order.id] = order
+        marker_path = path.with_suffix(".processed.json")
+        self._marker_path = marker_path
+        if marker_path.exists():
+            self._processed = {
+                key: datetime.fromisoformat(value)
+                for key, value in json.loads(marker_path.read_text(encoding="utf-8")).items()
+            }
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +162,15 @@ class JsonPaperOrderRepository(InMemoryPaperOrderRepository):
     def save(self, order: PaperOrder) -> None:
         super().save(order)
         self._flush()
+
+    def mark_processed(self, key: str, close_time: datetime) -> None:
+        super().mark_processed(key, close_time)
+        temp = self._marker_path.with_suffix(".tmp")
+        temp.write_text(
+            json.dumps({name: value.isoformat() for name, value in self._processed.items()}),
+            encoding="utf-8",
+        )
+        temp.replace(self._marker_path)
 
 
 class PaperBroker:
@@ -208,9 +237,15 @@ class PaperBroker:
         self._repository.save(closed)
         return closed
 
-    def process_candle(self, candle: Candle, *, symbol: str | None = None) -> list[PaperOrder]:
+    def process_candle(
+        self, candle: Candle, *, symbol: str | None = None, timeframe: str = "UNKNOWN"
+    ) -> list[PaperOrder]:
         if not candle.is_closed:
             raise ValueError("Paper Broker processa somente candles fechados.")
+        key = f"{symbol or '*'}:{timeframe}"
+        previous_close = self._repository.last_processed(key)
+        if previous_close is not None and candle.close_time <= previous_close:
+            return []
         changed: list[PaperOrder] = []
         for order in self._repository.list():
             if symbol is not None and order.ticket.symbol != symbol:
@@ -221,6 +256,7 @@ class PaperBroker:
             if updated != order:
                 self._repository.save(updated)
                 changed.append(updated)
+        self._repository.mark_processed(key, candle.close_time)
         return changed
 
     def _process(self, order: PaperOrder, candle: Candle) -> PaperOrder:

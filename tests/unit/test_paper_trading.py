@@ -183,3 +183,15 @@ def test_persistencia_e_reload_do_broker(tmp_path: Path) -> None:
     reloaded.process_candle(candle("9.5", "10.5"))
     after_processing = PaperBroker(JsonPaperOrderRepository(path)).list_orders()[0]
     assert after_processing.status is PaperOrderStatus.OPEN
+
+
+def test_processamento_do_mesmo_candle_e_idempotente(tmp_path: Path) -> None:
+    path = tmp_path / "paper_orders.json"
+    broker = PaperBroker(JsonPaperOrderRepository(path))
+    broker.register(ticket(), PaperOrderType.LIMIT, now=CREATED_AT)
+    current = candle("9.5", "10.5")
+    assert broker.process_candle(current, symbol="PETR4", timeframe="5m")
+    assert broker.process_candle(current, symbol="PETR4", timeframe="5m") == []
+
+    reloaded = PaperBroker(JsonPaperOrderRepository(path))
+    assert reloaded.process_candle(current, symbol="PETR4", timeframe="5m") == []

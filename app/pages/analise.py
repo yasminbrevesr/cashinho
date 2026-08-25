@@ -455,12 +455,11 @@ if series is None:
 # INDICADORES CALCULADOS
 # ============================================================
 
-closed_series = series.closed_only()
-
 # O grafico conserva os candles da serie completa. Seus overlays terminam no
 # ultimo fechamento; o painel decisorio e um objeto separado e fechado.
-panel = compute_panel(closed_series, selection)
-signal_panel = compute_panel(closed_series, selection)
+panel = compute_panel(series, selection)
+closed_series = series.closed_only()
+signal_panel = panel if closed_series is series else compute_panel(closed_series, selection)
 
 
 if panel.failures:
@@ -486,7 +485,7 @@ signal = evaluate_entry_signal(
 
 last_closed = closed_series.last
 if last_closed is not None:
-    paper_broker.process_candle(last_closed, symbol=symbol)
+    paper_broker.process_candle(last_closed, symbol=symbol, timeframe=timeframe.value)
 
 
 # ============================================================
