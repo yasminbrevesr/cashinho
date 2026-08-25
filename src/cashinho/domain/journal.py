@@ -7,6 +7,7 @@ registrada pode ser reconstruida depois.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from pydantic import Field
@@ -65,3 +66,50 @@ class JournalEntry(DomainModel):
     entry_reason: str = ""
     exit_reason: str = ""
     context: str = ""
+
+
+class DecisionJournalRecord(DomainModel):
+    """Snapshot idempotente de uma decisão final produzida pelo pipeline."""
+
+    idempotency_key: str
+    timestamp: UtcDatetime
+    symbol: str
+    should_enter: bool
+    side: str
+    timeframe: str | None = None
+    confidence: int = Field(ge=0, le=100)
+    primary_reason: str
+    reasons: tuple[str, ...] = ()
+    entry: Price | None = None
+    stop: Price | None = None
+    target: Price | None = None
+    risk_reward: Decimal | None = None
+    mode: Mode
+
+
+class PaperTradeJournalRecord(DomainModel):
+    """Espelho auditável do último estado conhecido de uma ordem PAPER."""
+
+    paper_order_id: str
+    decision_key: str | None = None
+    symbol: str
+    side: str
+    timeframe: str | None = None
+    order_type: str
+    quantity: int = Field(gt=0)
+    entry: Price
+    stop: Price
+    target: Price
+    status: str
+    created_at: UtcDatetime
+    filled_at: UtcDatetime | None = None
+    fill_price: Price | None = None
+    closed_at: UtcDatetime | None = None
+    close_price: Price | None = None
+    close_reason: str | None = None
+    monetary_risk: Money
+    notional: Money
+    pnl_value: Money | None = None
+    pnl_pct: Decimal | None = None
+    result_in_r: Decimal | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)

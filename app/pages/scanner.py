@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import streamlit as st
 
 from app.components.chrome import page_header, sidebar
+from app.runtime import journal_audit_service
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
 from cashinho.core.time.clocks import SystemClock
@@ -53,8 +54,10 @@ if st.button("Atualizar ranking", type="primary"):
             )
             statuses.append(result.report.status)
             if result.usable_series is not None:
-                analyses_series[timeframe] = result.usable_series.closed_only()
-                timestamps.append(result.report.checked_at)
+                closed = result.usable_series.closed_only()
+                analyses_series[timeframe] = closed
+                if closed.last is not None:
+                    timestamps.append(closed.last.close_time)
         if not analyses_series:
             continue
         analyses = analyze_timeframes(analyses_series, selection)
@@ -74,23 +77,33 @@ if st.button("Atualizar ranking", type="primary"):
             except ValueError:
                 pass
         data_status = max(statuses, key=lambda item: list(type(item)).index(item))
+        selected_series = (
+            analyses_series.get(advice.recommended_timeframe)
+            if advice.recommended_timeframe
+            else None
+        )
+        decision_timestamp = (
+            selected_series.last.close_time
+            if selected_series is not None and selected_series.last is not None
+            else max(timestamps)
+        )
         opportunity = build_opportunity(
             symbol=symbol,
             advice=advice,
             analyses=analyses,
             data_status=data_status,
             risk_approved=risk_approved,
-            timestamp=max(timestamps) if timestamps else datetime.now(UTC),
+            timestamp=decision_timestamp,
         )
-        decisions.append(
-            make_final_decision(
-                opportunity,
-                data_quality_approved=data_status is not DataStatus.BLOCKED,
-                risk_approved=risk_approved,
-                candles_closed=True,
-                minimum_risk_reward=settings.risk_profile().min_risk_reward,
-            )
+        decision = make_final_decision(
+            opportunity,
+            data_quality_approved=data_status is not DataStatus.BLOCKED,
+            risk_approved=risk_approved,
+            candles_closed=True,
+            minimum_risk_reward=settings.risk_profile().min_risk_reward,
         )
+        journal_audit_service().record_decision(decision, mode=Mode.RESEARCH)
+        decisions.append(decision)
     st.session_state["final_decision_ranking"] = sorted(
         decisions, key=lambda item: (item.should_enter, item.confidence), reverse=True
     )

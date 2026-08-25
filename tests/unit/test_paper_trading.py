@@ -163,6 +163,25 @@ def test_cancelamento_apenas_de_pending() -> None:
         broker.cancel_order(opened.id)
 
 
+def test_encerramento_manual_e_diferente_de_cancelamento() -> None:
+    broker = PaperBroker(InMemoryPaperOrderRepository())
+    opened = broker.register(ticket(), PaperOrderType.LIMIT, now=CREATED_AT)
+    broker.process_candle(candle("9.5", "10.5"))
+    closed_at = datetime(2026, 8, 20, 12, 10, tzinfo=UTC)
+    closed = broker.close_position(opened.id, price=Decimal("11"), closed_at=closed_at)
+    assert closed.status is PaperOrderStatus.CLOSED
+    assert closed.close_reason == "MANUAL"
+    assert closed.close_price == Decimal("11")
+
+
+def test_encerramento_manual_nao_aceita_horario_anterior() -> None:
+    broker = PaperBroker(InMemoryPaperOrderRepository())
+    opened = broker.register(ticket(), PaperOrderType.LIMIT, now=CREATED_AT)
+    broker.process_candle(candle("9.5", "10.5"))
+    with pytest.raises(ValueError, match="preceder"):
+        broker.close_position(opened.id, price=Decimal("11"), closed_at=CREATED_AT)
+
+
 def test_candle_em_formacao_e_bloqueado() -> None:
     broker = PaperBroker(InMemoryPaperOrderRepository())
     broker.register(ticket(), PaperOrderType.LIMIT, now=CREATED_AT)

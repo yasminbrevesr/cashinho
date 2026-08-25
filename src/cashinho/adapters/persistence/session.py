@@ -26,6 +26,7 @@ from cashinho.observability.logging import get_logger
 logger = get_logger(__name__)
 
 _SQLITE_PREFIX = "sqlite:///"
+SessionFactory = sessionmaker[Session]
 
 
 def resolve_database_url(url: str, root: Path = PROJECT_ROOT) -> str:
@@ -82,13 +83,13 @@ def init_db(engine: Engine) -> None:
     logger.info("banco inicializado", extra={"tables": sorted(Base.metadata.tables)})
 
 
-def build_session_factory(engine: Engine) -> sessionmaker[Session]:
+def build_session_factory(engine: Engine) -> SessionFactory:
     """Fabrica de sessoes vinculada ao engine."""
     return sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
 @contextmanager
-def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
+def session_scope(factory: SessionFactory) -> Iterator[Session]:
     """Transacao com commit ao final e rollback em caso de erro."""
     session = factory()
     try:

@@ -22,9 +22,11 @@ import streamlit as st
 
 from app.components.charts import candlestick_figure
 from app.components.chrome import page_header, sidebar
+from app.components.decision_card import render_decision_card
 from app.components.feed import render_feed_status, render_source_banner
 from app.components.paper_orders import render_paper_orders
 from app.components.quality import quality_panel
+from app.runtime import build_paper_broker
 from cashinho.adapters.providers.csv_provider import ProviderError
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
@@ -35,10 +37,11 @@ from cashinho.domain.risk import RiskProfile
 from cashinho.pipeline.entry_signal import evaluate_entry_signal
 from cashinho.pipeline.final_decision import make_final_decision
 from cashinho.pipeline.indicators import IndicatorSelection, compute_panel
+from cashinho.pipeline.journal_audit import decision_idempotency_key
 from cashinho.pipeline.market_data import load_market_data
 from cashinho.pipeline.multi_timeframe import advise_timeframe, analyze_timeframes
 from cashinho.pipeline.opportunities import build_opportunity
-from cashinho.pipeline.paper_broker import JsonPaperOrderRepository, PaperBroker, PaperOrderType
+from cashinho.pipeline.paper_broker import PaperOrderType
 from cashinho.pipeline.paper_ticket import (
     build_paper_ticket,
     calculate_ticket_sizing,
@@ -52,7 +55,7 @@ INSPECTION_MODE = Mode.RESEARCH
 # ============================================================
 
 settings = get_settings()
-paper_broker = PaperBroker(JsonPaperOrderRepository(settings.data_dir / "paper_orders.json"))
+paper_broker, journal_audit = build_paper_broker()
 
 sidebar(settings)
 
@@ -544,13 +547,27 @@ data_status = (
     if DataStatus.DEGRADED in quality_statuses
     else DataStatus.OK
 )
+selected_series = (
+    series_by_timeframe.get(timeframe_advice.recommended_timeframe)
+    if timeframe_advice.recommended_timeframe
+    else None
+)
+decision_timestamp = (
+    selected_series.last.close_time
+    if selected_series is not None and selected_series.last is not None
+    else max(
+        current.last.close_time
+        for current in series_by_timeframe.values()
+        if current.last is not None
+    )
+)
 opportunity = build_opportunity(
     symbol=symbol,
     advice=timeframe_advice,
     analyses=timeframe_analyses,
     data_status=data_status,
     risk_approved=risk_approved,
-    timestamp=result.report.checked_at,
+    timestamp=decision_timestamp,
 )
 decision = make_final_decision(
     opportunity,
@@ -559,6 +576,7 @@ decision = make_final_decision(
     candles_closed=not closed_series.has_open_candle,
     minimum_risk_reward=profile_base.min_risk_reward,
 )
+journal_audit.record_decision(decision, mode=INSPECTION_MODE)
 
 if decision.timeframe is not None and decision.timeframe in raw_series_by_timeframe:
     timeframe = decision.timeframe
@@ -577,14 +595,6 @@ if last_closed is not None:
 
 st.divider()
 last_price = series.last.close if series.last else None
-header_left, header_right = st.columns(2)
-header_left.markdown(f"### {symbol}")
-header_left.caption(
-    f"Timeframe analisado: **{decision.timeframe.value if decision.timeframe else timeframe.value}**"
-)
-header_right.markdown(f"### R$ {last_price:.2f}" if last_price is not None else "### —")
-header_right.caption("MT5 ONLINE" if choice.is_metatrader else "DADOS HISTÓRICOS")
-
 entrada_liberada = (
     decision.should_enter
     and decision.side in {"BUY", "SELL"}
@@ -597,25 +607,13 @@ if st.session_state.get("paper_ticket_context") != ticket_context:
     st.session_state["paper_ticket_context"] = ticket_context
     st.session_state["paper_ticket_open"] = False
 
-with st.container(border=True):
-    if decision.should_enter:
-        side_label = "COMPRA" if decision.side == "BUY" else "VENDA"
-        st.success(f"## 🟢 ENTRADA LIBERADA\n### {side_label}")
-        entry_col, stop_col, target_col, rr_col = st.columns(4)
-        entry_col.metric("Entrada", f"R$ {decision.entry:.2f}")
-        stop_col.metric("Stop", f"R$ {decision.stop:.2f}")
-        target_col.metric("Alvo", f"R$ {decision.target:.2f}")
-        rr_col.metric("R:R", f"{decision.risk_reward:.2f}")
-        confidence_col, button_col = st.columns([1, 2])
-        confidence_col.metric("Confiança", f"{decision.confidence}/100")
-        if button_col.button("ABRIR BOLETA PAPER", type="primary", use_container_width=True):
-            st.session_state["paper_ticket_open"] = True
-    else:
-        st.info("## ⚪ NÃO ENTRAR")
-        st.write("Ainda não existe uma entrada válida neste momento.")
-        st.write(f"**{decision.primary_reason}**")
-
-st.caption("Análise e execução exclusivamente PAPER.")
+if render_decision_card(
+    decision,
+    symbol=symbol,
+    last_price=last_price,
+    feed_label="MT5 ONLINE" if choice.is_metatrader else "DADOS HISTÓRICOS",
+):
+    st.session_state["paper_ticket_open"] = True
 
 
 # ============================================================
@@ -1115,6 +1113,7 @@ else:
                     quantity=quantidade,
                     min_risk_reward=profile.min_risk_reward,
                     maximum_quantity=sizing.quantity,
+                    timeframe=decision.timeframe.value if decision.timeframe else timeframe.value,
                 )
 
             except ValueError as exc:
@@ -1126,7 +1125,12 @@ else:
             else:
                 agora = datetime.now(UTC)
 
-                paper_broker.register(ticket, PaperOrderType.LIMIT, now=agora)
+                paper_broker.register(
+                    ticket,
+                    PaperOrderType.LIMIT,
+                    now=agora,
+                    decision_key=decision_idempotency_key(decision),
+                )
 
                 st.success(f"✅ Ordem PAPER de {lado_sinal} registrada: {quantidade} {symbol}.")
 

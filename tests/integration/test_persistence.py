@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -13,9 +13,19 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from cashinho.adapters.persistence.repositories import AnalysisRunRepository, JournalRepository
 from cashinho.adapters.persistence.session import resolve_database_url, session_scope
-from cashinho.domain.enums import DataStatus, Mode, OpportunityState
+from cashinho.domain.enums import DataStatus, Mode, OpportunityState, Timeframe
 from cashinho.domain.journal import AnalysisRun, JournalEntry
+from cashinho.domain.market import Candle
 from cashinho.domain.quality import DataQualityReport
+from cashinho.pipeline.final_decision import FinalDecision
+from cashinho.pipeline.journal_audit import JournalAuditService
+from cashinho.pipeline.paper_broker import (
+    InMemoryPaperOrderRepository,
+    PaperBroker,
+    PaperOrderStatus,
+    PaperOrderType,
+)
+from cashinho.pipeline.paper_ticket import build_paper_ticket
 from tests.conftest import REFERENCE_INSTANT
 
 pytestmark = pytest.mark.integration
@@ -35,7 +45,111 @@ def _entry(symbol: str = "PETR4", **kwargs: object) -> JournalEntry:
 
 def test_tabelas_criadas(sqlite_engine: Engine) -> None:
     tabelas = set(inspect(sqlite_engine).get_table_names())
-    assert {"analysis_runs", "journal_entries"} <= tabelas
+    assert {
+        "analysis_runs",
+        "journal_entries",
+        "decision_journal",
+        "paper_trade_journal",
+    } <= tabelas
+
+
+def test_final_decision_e_registrada_com_idempotencia(
+    session_factory: sessionmaker[Session],
+) -> None:
+    decision = FinalDecision(
+        should_enter=False,
+        side="NONE",
+        symbol="PETR4",
+        timeframe=Timeframe.M5,
+        confidence=42,
+        entry=None,
+        stop=None,
+        target=None,
+        risk_reward=None,
+        primary_reason="Gatilho ausente.",
+        reasons=("Gatilho ausente.",),
+        timestamp=REFERENCE_INSTANT,
+    )
+    audit = JournalAuditService(session_factory)
+    assert audit.record_decision(decision)
+    assert not audit.record_decision(decision)
+    with session_factory() as session:
+        records = JournalRepository(session).list_recent_decisions()
+    assert len(records) == 1
+    assert records[0].primary_reason == "Gatilho ausente."
+
+
+def test_contagem_de_entradas_liberadas_usa_banco_completo(
+    session_factory: sessionmaker[Session],
+) -> None:
+    decision = FinalDecision(
+        should_enter=True,
+        side="BUY",
+        symbol="PETR4",
+        timeframe=Timeframe.M5,
+        confidence=80,
+        entry=Decimal("10"),
+        stop=Decimal("9"),
+        target=Decimal("12"),
+        risk_reward=2.0,
+        primary_reason="Aprovada.",
+        reasons=("Aprovada.",),
+        timestamp=REFERENCE_INSTANT,
+    )
+    JournalAuditService(session_factory).record_decision(decision)
+    start = REFERENCE_INSTANT.replace(hour=0, minute=0, second=0, microsecond=0)
+    with session_factory() as session:
+        count = JournalRepository(session).count_released_decisions(
+            start=start, end=start + timedelta(days=1)
+        )
+    assert count == 1
+
+
+def test_ordem_aberta_e_encerrada_atualiza_diario(
+    session_factory: sessionmaker[Session],
+) -> None:
+    audit = JournalAuditService(session_factory)
+    broker = PaperBroker(InMemoryPaperOrderRepository(), observer=audit)
+    ticket = build_paper_ticket(
+        symbol="PETR4",
+        side="BUY",
+        entry=Decimal("10"),
+        stop=Decimal("9"),
+        target=Decimal("12"),
+        quantity=10,
+        timeframe="5m",
+    )
+    created = broker.register(
+        ticket,
+        PaperOrderType.LIMIT,
+        now=REFERENCE_INSTANT - timedelta(minutes=10),
+    )
+    opened = Candle(
+        open_time=REFERENCE_INSTANT,
+        close_time=REFERENCE_INSTANT + timedelta(minutes=5),
+        open=Decimal("10"),
+        high=Decimal("10.5"),
+        low=Decimal("9.5"),
+        close=Decimal("10"),
+        volume=100,
+    )
+    assert broker.process_candle(opened)[0].status is PaperOrderStatus.OPEN
+    with session_factory() as session:
+        opened_record = JournalRepository(session).list_recent_paper_trades()[0]
+    assert opened_record.status == "OPEN"
+    assert opened_record.fill_price == Decimal("10")
+    broker.close_position(
+        created.id,
+        price=Decimal("11"),
+        closed_at=REFERENCE_INSTANT + timedelta(minutes=15),
+    )
+
+    with session_factory() as session:
+        records = JournalRepository(session).list_recent_paper_trades()
+    assert len(records) == 1
+    assert records[0].status == "CLOSED"
+    assert records[0].pnl_value == Decimal("10.00")
+    assert records[0].result_in_r == Decimal("1.00")
 
 
 def test_gravacao_e_leitura_do_diario(session_factory: sessionmaker[Session]) -> None:

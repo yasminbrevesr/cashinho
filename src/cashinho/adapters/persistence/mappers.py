@@ -6,11 +6,22 @@ divergencia fica visivel aqui em vez de se espalhar pelo codigo.
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
-from cashinho.adapters.persistence.models import AnalysisRunRow, JournalEntryRow
+from cashinho.adapters.persistence.models import (
+    AnalysisRunRow,
+    DecisionJournalRow,
+    JournalEntryRow,
+    PaperTradeJournalRow,
+)
 from cashinho.domain.enums import Mode, OpportunityState
-from cashinho.domain.journal import AnalysisRun, JournalEntry
+from cashinho.domain.journal import (
+    AnalysisRun,
+    DecisionJournalRecord,
+    JournalEntry,
+    PaperTradeJournalRecord,
+)
 
 
 def analysis_run_to_row(run: AnalysisRun) -> AnalysisRunRow:
@@ -79,4 +90,74 @@ def row_to_journal_entry(row: JournalEntryRow) -> JournalEntry:
         entry_reason=row.entry_reason,
         exit_reason=row.exit_reason,
         context=row.context,
+    )
+
+
+def decision_record_to_row(record: DecisionJournalRecord) -> DecisionJournalRow:
+    return DecisionJournalRow(
+        idempotency_key=record.idempotency_key,
+        timestamp=record.timestamp,
+        symbol=record.symbol,
+        should_enter=record.should_enter,
+        side=record.side,
+        timeframe=record.timeframe,
+        confidence=record.confidence,
+        primary_reason=record.primary_reason,
+        reasons_json=json.dumps(record.reasons, ensure_ascii=False),
+        entry=record.entry,
+        stop=record.stop,
+        target=record.target,
+        risk_reward=record.risk_reward,
+        mode=record.mode.value,
+    )
+
+
+def row_to_decision_record(row: DecisionJournalRow) -> DecisionJournalRecord:
+    return DecisionJournalRecord(
+        idempotency_key=row.idempotency_key,
+        timestamp=row.timestamp,
+        symbol=row.symbol,
+        should_enter=row.should_enter,
+        side=row.side,
+        timeframe=row.timeframe,
+        confidence=row.confidence,
+        primary_reason=row.primary_reason,
+        reasons=tuple(json.loads(row.reasons_json)),
+        entry=row.entry,
+        stop=row.stop,
+        target=row.target,
+        risk_reward=row.risk_reward,
+        mode=Mode(row.mode),
+    )
+
+
+def paper_trade_record_to_row(record: PaperTradeJournalRecord) -> PaperTradeJournalRow:
+    return PaperTradeJournalRow(**record.model_dump())
+
+
+def row_to_paper_trade_record(row: PaperTradeJournalRow) -> PaperTradeJournalRecord:
+    return PaperTradeJournalRecord(
+        paper_order_id=row.paper_order_id,
+        decision_key=row.decision_key,
+        symbol=row.symbol,
+        side=row.side,
+        timeframe=row.timeframe,
+        order_type=row.order_type,
+        quantity=row.quantity,
+        entry=row.entry,
+        stop=row.stop,
+        target=row.target,
+        status=row.status,
+        created_at=row.created_at,
+        filled_at=row.filled_at,
+        fill_price=row.fill_price,
+        closed_at=row.closed_at,
+        close_price=row.close_price,
+        close_reason=row.close_reason,
+        monetary_risk=row.monetary_risk,
+        notional=row.notional,
+        pnl_value=row.pnl_value,
+        pnl_pct=row.pnl_pct,
+        result_in_r=row.result_in_r,
+        duration_seconds=row.duration_seconds,
     )

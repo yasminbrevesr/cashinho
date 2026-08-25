@@ -18,6 +18,7 @@ class PaperTicket:
     monetary_risk: Decimal
     notional: Decimal
     risk_reward: Decimal
+    timeframe: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +128,7 @@ def build_paper_ticket(
     quantity: int,
     min_risk_reward: Decimal = Decimal("1"),
     maximum_quantity: int | None = None,
+    timeframe: str | None = None,
 ) -> PaperTicket:
     """
     Monta uma ordem simulada.
@@ -181,4 +183,5 @@ def build_paper_ticket(
         monetary_risk=monetary_risk,
         notional=notional,
         risk_reward=risk_reward,
+        timeframe=timeframe,
     )

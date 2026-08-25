@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol
 from uuid import uuid4
 
 from cashinho.domain.market import Candle, Quote
@@ -43,6 +44,13 @@ class PaperOrder:
     closed_at: datetime | None = None
     close_price: Decimal | None = None
     close_reason: str | None = None
+    decision_key: str | None = None
+
+
+class PaperOrderObserver(Protocol):
+    """Observador de auditoria; não participa das regras de execução."""
+
+    def on_order_changed(self, order: PaperOrder) -> None: ...
 
 
 class PaperOrderRepository:
@@ -134,6 +142,7 @@ class JsonPaperOrderRepository(InMemoryPaperOrderRepository):
                     else None,
                     close_price=Decimal(raw["close_price"]) if raw["close_price"] else None,
                     close_reason=raw["close_reason"],
+                    decision_key=raw.get("decision_key"),
                 )
                 self._orders[order.id] = order
         marker_path = path.with_suffix(".processed.json")
@@ -174,8 +183,14 @@ class JsonPaperOrderRepository(InMemoryPaperOrderRepository):
 
 
 class PaperBroker:
-    def __init__(self, repository: PaperOrderRepository) -> None:
+    def __init__(
+        self,
+        repository: PaperOrderRepository,
+        *,
+        observer: PaperOrderObserver | None = None,
+    ) -> None:
         self._repository = repository
+        self._observer = observer
 
     def register(
         self,
@@ -184,6 +199,7 @@ class PaperBroker:
         *,
         quote: Quote | None = None,
         now: datetime,
+        decision_key: str | None = None,
     ) -> PaperOrder:
         created_at = now
         if order_type is PaperOrderType.MARKET:
@@ -201,12 +217,19 @@ class PaperBroker:
                 created_at,
                 created_at,
                 fill,
+                decision_key=decision_key,
             )
         else:
             order = PaperOrder(
-                str(uuid4()), ticket, order_type, PaperOrderStatus.PENDING, created_at
+                str(uuid4()),
+                ticket,
+                order_type,
+                PaperOrderStatus.PENDING,
+                created_at,
+                decision_key=decision_key,
             )
         self._repository.add(order)
+        self._publish(order)
         return order
 
     def list_orders(self) -> list[PaperOrder]:
@@ -218,6 +241,7 @@ class PaperBroker:
             raise ValueError("Somente uma ordem PAPER PENDING pode ser cancelada.")
         cancelled = replace(order, status=PaperOrderStatus.CANCELLED)
         self._repository.save(cancelled)
+        self._publish(cancelled)
         return cancelled
 
     def close_position(self, order_id: str, *, price: Decimal, closed_at: datetime) -> PaperOrder:
@@ -227,6 +251,8 @@ class PaperBroker:
             raise ValueError("Somente uma posicao PAPER OPEN pode ser encerrada.")
         if price <= 0:
             raise ValueError("Preco de fechamento deve ser maior que zero.")
+        if order.filled_at is not None and closed_at < order.filled_at:
+            raise ValueError("Horario de fechamento nao pode preceder a abertura.")
         closed = replace(
             order,
             status=PaperOrderStatus.CLOSED,
@@ -235,6 +261,7 @@ class PaperBroker:
             close_reason="MANUAL",
         )
         self._repository.save(closed)
+        self._publish(closed)
         return closed
 
     def process_candle(
@@ -255,6 +282,7 @@ class PaperBroker:
             updated = self._process(order, candle)
             if updated != order:
                 self._repository.save(updated)
+                self._publish(updated)
                 changed.append(updated)
         self._repository.mark_processed(key, candle.close_time)
         return changed
@@ -301,3 +329,7 @@ class PaperBroker:
         if order is None:
             raise KeyError(order_id)
         return order
+
+    def _publish(self, order: PaperOrder) -> None:
+        if self._observer is not None:
+            self._observer.on_order_changed(order)
