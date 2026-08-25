@@ -25,7 +25,7 @@ DUAS LICOES DO TERMINAL REAL
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -327,24 +327,37 @@ class MetaTraderMarketDataProvider:
         return info
 
     def _recent_ticks(
-        self, symbol: str, kind: str, now: datetime
-    ) -> list[dict[str, Any]]:
+        self, symbol: str, kind: str, now: datetime) -> list[dict[str, Any]]:
         """Ticks da janela recente, em ordem cronologica.
 
         O intervalo termina em `agora` de proposito: pedir "os N primeiros a
         partir de ha 30 minutos" devolve o comeco da janela quando o mercado
         esta movimentado, e o adapter passaria a entregar preco velho.
         """
-        server_now = self._time.server_now(now)
+        server_wall = self._time.server_now(now)
+
+        # O terminal da Genial indexa os ticks pelo relogio de parede do
+        # servidor, mas a API Python do MT5 exige datetime timezone-aware.
+        # Mantemos o horario da Genial e o marcamos como UTC somente
+        # para montar a consulta ao copy_ticks_range.
+        server_now = server_wall.replace(tzinfo=UTC)
+
         start = server_now - timedelta(minutes=TICK_LOOKBACK_MINUTES)
+
         try:
-            ticks = self._terminal.ticks_range(symbol, start, server_now, kind)
+            ticks = self._terminal.ticks_range(
+                symbol,
+                start,
+                server_now,
+                kind,
+            )
         except (MetaTraderError, MetaTraderUnavailableError) as exc:
             logger.warning(
                 "falha ao ler ticks",
                 extra={"symbol": symbol, "kind": kind, "error": str(exc)},
             )
             return []
+
         return list(ticks)
 
     def _latest_book(
