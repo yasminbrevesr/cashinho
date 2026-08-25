@@ -28,6 +28,7 @@ class PaperOrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
     STOPPED = "STOPPED"
     TARGETED = "TARGETED"
+    CLOSED = "CLOSED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,18 +183,39 @@ class PaperBroker:
     def list_orders(self) -> list[PaperOrder]:
         return self._repository.list()
 
-    def cancel(self, order_id: str) -> PaperOrder:
+    def cancel_order(self, order_id: str) -> PaperOrder:
         order = self._required(order_id)
-        if order.status not in {PaperOrderStatus.PENDING, PaperOrderStatus.OPEN}:
-            raise ValueError("A ordem PAPER nao pode mais ser cancelada.")
+        if order.status is not PaperOrderStatus.PENDING:
+            raise ValueError("Somente uma ordem PAPER PENDING pode ser cancelada.")
         cancelled = replace(order, status=PaperOrderStatus.CANCELLED)
         self._repository.save(cancelled)
         return cancelled
 
+    def close_position(self, order_id: str, *, price: Decimal, closed_at: datetime) -> PaperOrder:
+        """Encerra manualmente uma posicao PAPER; nao cancela sua ordem de entrada."""
+        order = self._required(order_id)
+        if order.status is not PaperOrderStatus.OPEN:
+            raise ValueError("Somente uma posicao PAPER OPEN pode ser encerrada.")
+        if price <= 0:
+            raise ValueError("Preco de fechamento deve ser maior que zero.")
+        closed = replace(
+            order,
+            status=PaperOrderStatus.CLOSED,
+            closed_at=closed_at,
+            close_price=price,
+            close_reason="MANUAL",
+        )
+        self._repository.save(closed)
+        return closed
+
     def process_candle(self, candle: Candle, *, symbol: str | None = None) -> list[PaperOrder]:
+        if not candle.is_closed:
+            raise ValueError("Paper Broker processa somente candles fechados.")
         changed: list[PaperOrder] = []
         for order in self._repository.list():
             if symbol is not None and order.ticket.symbol != symbol:
+                continue
+            if candle.close_time <= order.created_at:
                 continue
             updated = self._process(order, candle)
             if updated != order:

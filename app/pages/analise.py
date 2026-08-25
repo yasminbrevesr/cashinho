@@ -23,6 +23,7 @@ import streamlit as st
 from app.components.charts import candlestick_figure
 from app.components.chrome import page_header, sidebar
 from app.components.feed import render_feed_status, render_source_banner
+from app.components.paper_orders import render_paper_orders
 from app.components.quality import quality_panel
 from cashinho.adapters.providers.csv_provider import ProviderError
 from cashinho.adapters.providers.factory import build_market_data_provider
@@ -48,6 +49,7 @@ INSPECTION_MODE = Mode.RESEARCH
 # ============================================================
 
 settings = get_settings()
+paper_broker = PaperBroker(JsonPaperOrderRepository(settings.data_dir / "paper_orders.json"))
 
 sidebar(settings)
 
@@ -75,9 +77,6 @@ provider = choice.provider
 
 if "monitorando" not in st.session_state:
     st.session_state.monitorando = False
-
-if "paper_orders" not in st.session_state:
-    st.session_state.paper_orders = []
 
 if "capital_operacional" not in st.session_state:
     st.session_state.capital_operacional = float(settings.capital)
@@ -386,17 +385,7 @@ with acao_col:
 
 
 if not st.session_state.monitorando:
-    if st.session_state.paper_orders:
-        with st.expander(
-            "Ordens PAPER da sessão",
-            expanded=False,
-        ):
-            st.dataframe(
-                st.session_state.paper_orders,
-                use_container_width=True,
-                hide_index=True,
-            )
-
+    render_paper_orders(paper_broker)
     st.stop()
 
 
@@ -466,10 +455,12 @@ if series is None:
 # INDICADORES CALCULADOS
 # ============================================================
 
-panel = compute_panel(
-    series,
-    selection,
-)
+closed_series = series.closed_only()
+
+# O grafico conserva os candles da serie completa. Seus overlays terminam no
+# ultimo fechamento; o painel decisorio e um objeto separado e fechado.
+panel = compute_panel(closed_series, selection)
+signal_panel = compute_panel(closed_series, selection)
 
 
 if panel.failures:
@@ -489,9 +480,13 @@ if panel.failures:
 # ============================================================
 
 signal = evaluate_entry_signal(
-    series,
-    panel,
+    closed_series,
+    signal_panel,
 )
+
+last_closed = closed_series.last
+if last_closed is not None:
+    paper_broker.process_candle(last_closed, symbol=symbol)
 
 
 # ============================================================
@@ -538,7 +533,7 @@ else:
 # RESUMO DO SINAL
 # ------------------------------------------------------------
 
-col_dir, col_score = st.columns([2, 1])
+col_dir, col_score, col_trigger = st.columns([2, 1, 1])
 
 col_dir.metric(
     "Direção",
@@ -548,6 +543,11 @@ col_dir.metric(
 col_score.metric(
     "Score de confluência",
     f"{signal.score}/100",
+)
+
+col_trigger.metric(
+    "Estado do gatilho",
+    "CONFIRMADO" if signal.trigger_confirmed else "AGUARDANDO",
 )
 
 
@@ -930,6 +930,7 @@ else:
             quantidade = st.number_input(
                 "Quantidade",
                 min_value=1,
+                max_value=sizing.quantity,
                 step=1,
                 key=qty_key,
             )
@@ -954,24 +955,26 @@ else:
 
         st.markdown("### Controle de risco")
 
-        col1, col2, col3, col4 = st.columns(4)
+        row1_col1, row1_col2 = st.columns(2)
 
-        col1.metric(
+        row1_col1.metric(
             "Risco da ordem",
             f"R$ {risco_ordem:,.2f}",
         )
 
-        col2.metric(
+        row1_col2.metric(
             "Risco máximo",
             f"R$ {sizing.monetary_risk_limit:,.2f}",
         )
 
-        col3.metric(
+        row2_col1, row2_col2 = st.columns(2)
+
+        row2_col1.metric(
             "Exposição",
             f"R$ {exposicao_ordem:,.2f}",
         )
 
-        col4.metric(
+        row2_col2.metric(
             "R:R",
             f"{rr_manual:.2f}",
         )
@@ -1087,31 +1090,7 @@ else:
             else:
                 agora = datetime.now(UTC)
 
-                ordem = {
-                    "Data/Hora UTC": agora.strftime("%d/%m/%Y %H:%M:%S"),
-                    "Ativo": ticket.symbol,
-                    "Tipo": tipo_ordem,
-                    "Lado": ("COMPRA" if ticket.side == "BUY" else "VENDA"),
-                    "Quantidade": ticket.quantity,
-                    "Preço": float(ticket.entry),
-                    "Gain": float(ticket.target),
-                    "Loss": float(ticket.stop),
-                    "Offset": float(offset),
-                    "R:R": float(ticket.risk_reward),
-                    "Risco": float(ticket.monetary_risk),
-                    "Exposição": float(ticket.notional),
-                    "Capital": float(capital_operacional),
-                    "Validade": str(data_validade),
-                    "Status": "ABERTA",
-                }
-
-                broker = PaperBroker(
-                    JsonPaperOrderRepository(settings.data_dir / "paper_orders.json")
-                )
-                broker.register(ticket, PaperOrderType.LIMIT, now=agora)
-                # Espelho apenas para compatibilidade visual; a fonte de verdade
-                # agora e o repositorio proprio do Paper Broker.
-                st.session_state.paper_orders.append(ordem)
+                paper_broker.register(ticket, PaperOrderType.LIMIT, now=agora)
 
                 st.success(f"✅ Ordem PAPER de {lado_sinal} registrada: {quantidade} {symbol}.")
 
@@ -1135,18 +1114,8 @@ else:
 # ORDENS PAPER
 # ============================================================
 
-if st.session_state.paper_orders:
-    st.divider()
-
-    with st.expander(
-        f"📋 Ordens PAPER da sessão ({len(st.session_state.paper_orders)})",
-        expanded=False,
-    ):
-        st.dataframe(
-            st.session_state.paper_orders,
-            use_container_width=True,
-            hide_index=True,
-        )
+st.divider()
+render_paper_orders(paper_broker)
 
 
 # ============================================================

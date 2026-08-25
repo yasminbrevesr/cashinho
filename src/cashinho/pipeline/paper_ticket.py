@@ -45,13 +45,16 @@ def calculate_ticket_sizing(
     Limites considerados:
     - risco maximo por operacao;
     - exposicao maxima por ativo;
-    - lote padrao de 100 acoes.
+    - lote fracionario de uma unidade por padrao.
 
     Nao envia nenhuma ordem.
     """
 
     entry = Decimal(entry)
     stop = Decimal(stop)
+
+    if lot_size <= 0:
+        raise ValueError("Lote deve ser maior que zero.")
 
     if entry <= 0:
         raise ValueError("Entrada deve ser maior que zero.")
