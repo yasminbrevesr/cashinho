@@ -113,3 +113,39 @@ class PaperTradeJournalRecord(DomainModel):
     pnl_pct: Decimal | None = None
     result_in_r: Decimal | None = None
     duration_seconds: int | None = Field(default=None, ge=0)
+
+
+class PositionDecisionJournalRecord(DomainModel):
+    """Mudança relevante de estado decidida para uma posição PAPER aberta."""
+
+    idempotency_key: str
+    paper_order_id: str
+    timestamp: UtcDatetime
+    symbol: str
+    side: str
+    action: str
+    confidence: int = Field(ge=0, le=100)
+    current_price: Price | None = None
+    stop: Price
+    target: Price
+    exit_price: Price | None = None
+    exit_reason: str | None = None
+    primary_reason: str
+    reasons: tuple[str, ...] = ()
+
+
+class PaperOrderEventRecord(DomainModel):
+    """Transição imutável de uma ordem/posição PAPER."""
+
+    idempotency_key: str
+    paper_order_id: str
+    timestamp: UtcDatetime
+    symbol: str
+    side: str
+    status: str
+    quantity: int = Field(gt=0)
+    fill_price: Price | None = None
+    close_price: Price | None = None
+    close_reason: str | None = None
+    pnl_value: Money | None = None
+    result_in_r: Decimal | None = None

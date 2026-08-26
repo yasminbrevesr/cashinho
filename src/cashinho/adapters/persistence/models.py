@@ -132,6 +132,46 @@ class PaperTradeJournalRow(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class PositionDecisionJournalRow(Base):
+    """Eventos HOLD/EXIT relevantes, idempotentes por posição e candle."""
+
+    __tablename__ = "position_decision_journal"
+
+    idempotency_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    paper_order_id: Mapped[str] = mapped_column(String(36), index=True)
+    timestamp: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    action: Mapped[str] = mapped_column(String(8), index=True)
+    confidence: Mapped[int] = mapped_column(Integer)
+    current_price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    stop: Mapped[Decimal] = mapped_column(DecimalText)
+    target: Mapped[Decimal] = mapped_column(DecimalText)
+    exit_price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    primary_reason: Mapped[str] = mapped_column(Text)
+    reasons_json: Mapped[str] = mapped_column(Text)
+
+
+class PaperOrderEventRow(Base):
+    """Histórico imutável das transições relevantes do Paper Broker."""
+
+    __tablename__ = "paper_order_events"
+
+    idempotency_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    paper_order_id: Mapped[str] = mapped_column(String(36), index=True)
+    timestamp: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    side: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    fill_price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    close_price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    close_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pnl_value: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    result_in_r: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+
+
 Index(
     "ix_decision_journal_symbol_timestamp",
     DecisionJournalRow.symbol,

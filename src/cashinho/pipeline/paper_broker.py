@@ -244,8 +244,15 @@ class PaperBroker:
         self._publish(cancelled)
         return cancelled
 
-    def close_position(self, order_id: str, *, price: Decimal, closed_at: datetime) -> PaperOrder:
-        """Encerra manualmente uma posicao PAPER; nao cancela sua ordem de entrada."""
+    def close_position(
+        self,
+        order_id: str,
+        *,
+        price: Decimal,
+        closed_at: datetime,
+        reason: str = "MANUAL",
+    ) -> PaperOrder:
+        """Encerra uma posição PAPER; não cancela sua ordem de entrada."""
         order = self._required(order_id)
         if order.status is not PaperOrderStatus.OPEN:
             raise ValueError("Somente uma posicao PAPER OPEN pode ser encerrada.")
@@ -253,12 +260,21 @@ class PaperBroker:
             raise ValueError("Preco de fechamento deve ser maior que zero.")
         if order.filled_at is not None and closed_at < order.filled_at:
             raise ValueError("Horario de fechamento nao pode preceder a abertura.")
+        allowed_reasons = {
+            "MANUAL",
+            "RISK_EXIT",
+            "THESIS_INVALIDATED",
+            "OPPOSITE_SIGNAL",
+            "CONTEXT_REVERSAL",
+        }
+        if reason not in allowed_reasons:
+            raise ValueError("Motivo de fechamento PAPER inválido.")
         closed = replace(
             order,
             status=PaperOrderStatus.CLOSED,
             closed_at=closed_at,
             close_price=price,
-            close_reason="MANUAL",
+            close_reason=reason,
         )
         self._repository.save(closed)
         self._publish(closed)
@@ -276,6 +292,12 @@ class PaperBroker:
         changed: list[PaperOrder] = []
         for order in self._repository.list():
             if symbol is not None and order.ticket.symbol != symbol:
+                continue
+            if (
+                timeframe != "UNKNOWN"
+                and order.ticket.timeframe is not None
+                and order.ticket.timeframe != timeframe
+            ):
                 continue
             if candle.close_time <= order.created_at:
                 continue

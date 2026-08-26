@@ -89,6 +89,23 @@ ruff check . && mypy         # lint e tipos
 provedor em tempo real, o Risk Manager completo e o gerador de boleta validado não
 existirem. A falha acontece no arranque, não no envio de uma ordem.
 
+## Ciclo PAPER
+
+O fluxo operacional cobre entrada, acompanhamento e encerramento:
+
+1. `FinalDecision` responde somente `ENTRADA LIBERADA` ou `NÃO ENTRAR`.
+2. Após o fill, `PositionManager` responde `MANTER POSIÇÃO` ou `SAIR DA POSIÇÃO`.
+3. STOP/TARGET têm prioridade e, sem sequência intrabar, STOP vence o empate.
+4. Saída dinâmica exige bid para encerrar BUY e ask para encerrar SELL; nenhum
+   preço é substituído por `last`.
+5. `PaperBroker` realiza a transição, o P&L compartilhado calcula o resultado e o
+   diário grava eventos idempotentes.
+6. O backtest compara STOP+TARGET contra STOP+TARGET+PositionManager, inclusive
+   por motivo de encerramento.
+
+Não há trailing stop nesta versão e nenhum sinal contrário faz reversão
+automática: primeiro a posição atual é encerrada, sempre no ambiente PAPER.
+
 ## Estrutura
 
 ```text
@@ -134,3 +151,9 @@ tests/            unit, integration e golden
   Fase 6, antes de o diário acumular dados que não possam ser perdidos.
 - Os limites de risco vêm de valores padrão de configuração, não do estado
   operacional real.
+- O Position Manager usa stop e target fixos. A arquitetura admite uma política
+  futura de trailing stop, mas ela não foi implementada.
+- Saídas dinâmicas do PAPER dependem de book ativo; sem bid/ask, a interface mostra
+  a recomendação e mantém a posição aberta.
+- O backtest executa saídas dinâmicas no fechamento conhecido do candle operacional;
+  não modela sequência intrabar além da regra conservadora de STOP.

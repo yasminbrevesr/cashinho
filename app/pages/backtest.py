@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import streamlit as st
 
-from app.components.backtest_results import render_backtest_result
+from app.components.backtest_results import render_backtest_comparison
 from app.components.chrome import page_header, sidebar
 from cashinho.adapters.providers.factory import build_market_data_provider
 from cashinho.config.settings import get_settings
@@ -17,7 +17,7 @@ from cashinho.domain.errors import CashinhoError
 from cashinho.pipeline.backtest import (
     ExecutionCostModel,
     PipelineDecisionEvaluator,
-    run_backtest,
+    compare_exit_modes,
     temporal_split,
 )
 from cashinho.pipeline.indicators import IndicatorSelection
@@ -142,7 +142,7 @@ if st.button("EXECUTAR BACKTEST", type="primary", use_container_width=True):
             slippage=slippage,
             fixed_fee_per_order=fixed_fee,
         )
-        overall = run_backtest(
+        overall = compare_exit_modes(
             series_by_timeframe,
             evaluator,
             risk_profile=profile,
@@ -154,7 +154,12 @@ if st.button("EXECUTAR BACKTEST", type="primary", use_container_width=True):
             validation_pct=validation_pct,
         )
         segmented = {
-            label: run_backtest(sample, evaluator, risk_profile=profile, costs=cost_model)
+            label: compare_exit_modes(
+                sample,
+                evaluator,
+                risk_profile=profile,
+                costs=cost_model,
+            )
             for label, sample in samples.items()
             if any(len(series) for series in sample.values())
         }
@@ -168,11 +173,11 @@ saved = st.session_state.get("backtest_results")
 if saved:
     tabs = st.tabs(["GERAL", "TRAIN", "VALIDATION", "TEST"])
     with tabs[0]:
-        render_backtest_result(saved["overall"], initial_capital=saved["capital"])
+        render_backtest_comparison(saved["overall"], initial_capital=saved["capital"])
     for tab, label in zip(tabs[1:], ("TRAIN", "VALIDATION", "TEST"), strict=True):
         with tab:
             result = saved["segments"].get(label)
             if result is None:
                 st.info("Amostra sem candles suficientes.")
             else:
-                render_backtest_result(result, initial_capital=saved["capital"])
+                render_backtest_comparison(result, initial_capital=saved["capital"])

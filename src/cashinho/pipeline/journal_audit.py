@@ -11,10 +11,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from cashinho.adapters.persistence.repositories import JournalRepository
 from cashinho.adapters.persistence.session import session_scope
 from cashinho.domain.enums import Mode
-from cashinho.domain.journal import DecisionJournalRecord, PaperTradeJournalRecord
+from cashinho.domain.journal import (
+    DecisionJournalRecord,
+    PaperOrderEventRecord,
+    PaperTradeJournalRecord,
+    PositionDecisionJournalRecord,
+)
 from cashinho.pipeline.final_decision import FinalDecision
 from cashinho.pipeline.paper_broker import PaperOrder, PaperOrderObserver
 from cashinho.pipeline.paper_performance import realized_pnl
+from cashinho.pipeline.position_manager import PositionDecision
 
 
 def decision_idempotency_key(decision: FinalDecision) -> str:
@@ -77,6 +83,57 @@ def paper_trade_record(order: PaperOrder) -> PaperTradeJournalRecord:
     )
 
 
+def position_decision_idempotency_key(
+    order_id: str, decision: PositionDecision
+) -> str:
+    reason = decision.exit_reason.value if decision.exit_reason else "NONE"
+    identity = (
+        f"{order_id}|{decision.timestamp.isoformat()}|{decision.action.value}|{reason}"
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def paper_order_event_record(order: PaperOrder) -> PaperOrderEventRecord:
+    result = realized_pnl(order)
+    timestamp = order.closed_at or order.filled_at or order.created_at
+    identity = f"{order.id}|{order.status.value}|{timestamp.isoformat()}"
+    return PaperOrderEventRecord(
+        idempotency_key=hashlib.sha256(identity.encode("utf-8")).hexdigest(),
+        paper_order_id=order.id,
+        timestamp=timestamp,
+        symbol=order.ticket.symbol,
+        side=order.ticket.side,
+        status=order.status.value,
+        quantity=order.ticket.quantity,
+        fill_price=order.fill_price,
+        close_price=order.close_price,
+        close_reason=order.close_reason,
+        pnl_value=result.pnl_value if result else None,
+        result_in_r=result.result_in_r if result else None,
+    )
+
+
+def position_decision_record(
+    order_id: str, decision: PositionDecision
+) -> PositionDecisionJournalRecord:
+    return PositionDecisionJournalRecord(
+        idempotency_key=position_decision_idempotency_key(order_id, decision),
+        paper_order_id=order_id,
+        timestamp=decision.timestamp,
+        symbol=decision.symbol,
+        side=decision.side,
+        action=decision.action.value,
+        confidence=decision.confidence,
+        current_price=decision.current_price,
+        stop=decision.stop,
+        target=decision.target,
+        exit_price=decision.exit_price,
+        exit_reason=decision.exit_reason.value if decision.exit_reason else None,
+        primary_reason=decision.primary_reason,
+        reasons=decision.reasons,
+    )
+
+
 class JournalAuditService(PaperOrderObserver):
     """Observador transacional usado pelos fluxos PAPER e de análise."""
 
@@ -92,7 +149,17 @@ class JournalAuditService(PaperOrderObserver):
 
     def on_order_changed(self, order: PaperOrder) -> None:
         with session_scope(self._factory) as session:
-            JournalRepository(session).upsert_paper_trade(paper_trade_record(order))
+            repository = JournalRepository(session)
+            repository.upsert_paper_trade(paper_trade_record(order))
+            repository.record_paper_order_event(paper_order_event_record(order))
+
+    def record_position_decision(
+        self, order_id: str, decision: PositionDecision
+    ) -> bool:
+        with session_scope(self._factory) as session:
+            return JournalRepository(session).record_position_decision(
+                position_decision_record(order_id, decision)
+            )
 
     def sync_orders(self, orders: Iterable[PaperOrder]) -> None:
         """Preenche auditoria de ordens antigas; reruns não duplicam registros."""
@@ -100,3 +167,4 @@ class JournalAuditService(PaperOrderObserver):
             repository = JournalRepository(session)
             for order in orders:
                 repository.upsert_paper_trade(paper_trade_record(order))
+                repository.record_paper_order_event(paper_order_event_record(order))

@@ -10,15 +10,20 @@ from cashinho.domain.errors import LookaheadError
 from cashinho.domain.market import Candle, CandleSeries
 from cashinho.domain.risk import RiskProfile
 from cashinho.pipeline.backtest import (
+    BacktestExitMode,
     BacktestTrade,
     ExecutionCostModel,
+    HistoricalPositionContext,
     PipelineDecisionEvaluator,
     calculate_metrics,
+    compare_exit_modes,
     run_backtest,
     temporal_split,
 )
+from cashinho.pipeline.entry_signal import EntrySignal
 from cashinho.pipeline.final_decision import FinalDecision
 from cashinho.pipeline.indicators import IndicatorSelection
+from cashinho.pipeline.multi_timeframe import TimeframeAdvice
 from tests.conftest import REFERENCE_INSTANT, make_series
 
 START = datetime(2026, 8, 20, 10, tzinfo=UTC)
@@ -79,6 +84,43 @@ class FirstDecision:
             primary_reason="teste",
             reasons=("teste",),
             timestamp=as_of,
+        )
+
+
+class OppositePositionContext:
+    def __init__(self) -> None:
+        self.seen: list[datetime] = []
+
+    def position_context(
+        self,
+        series_by_timeframe: dict[Timeframe, CandleSeries],
+        *,
+        as_of: datetime,
+        preferred_timeframe: Timeframe,
+    ) -> HistoricalPositionContext:
+        current = series_by_timeframe[preferred_timeframe]
+        self.seen.extend(candle.close_time for candle in current.candles)
+        return HistoricalPositionContext(
+            recent_candles=current,
+            technical_signal=EntrySignal(
+                side="SELL",
+                status="ENTRADA LIBERADA",
+                score=85,
+                entry=Decimal("10"),
+                stop=Decimal("11"),
+                target=Decimal("8"),
+                risk_reward=2.0,
+                reasons=("reversão",),
+                trigger_confirmed=True,
+            ),
+            timeframe_advice=TimeframeAdvice(
+                recommended_timeframe=Timeframe.M5,
+                context_timeframes=(Timeframe.H1,),
+                trigger_timeframe=Timeframe.M1,
+                score=82,
+                side="SELL",
+                reasons=("reversão",),
+            ),
         )
 
 
@@ -213,6 +255,44 @@ def test_modelo_de_custos_reduz_resultado() -> None:
         costs=ExecutionCostModel(spread=Decimal("0.10"), slippage=Decimal("0.05")),
     )
     assert result.trades[0].net_pnl < result.trades[0].gross_pnl
+
+
+def test_backtest_dinamico_reutiliza_position_manager_sem_lookahead() -> None:
+    data = series(
+        market_candle(0, low="9.8", high="10.2"),
+        market_candle(1, low="9.8", high="10.4"),
+        market_candle(2, low="9.7", high="10.5"),
+        market_candle(3, low="9.8", high="12.5"),
+    )
+    context = OppositePositionContext()
+    result = run_backtest(
+        {Timeframe.M5: data},
+        FirstDecision(),
+        risk_profile=PROFILE,
+        exit_mode=BacktestExitMode.DYNAMIC,
+        position_context_provider=context,
+    )
+    assert result.trades[0].close_reason == "OPPOSITE_SIGNAL"
+    assert context.seen
+    assert max(context.seen) <= result.trades[0].exited_at
+
+
+def test_comparacao_nao_presume_que_gestao_dinamica_e_melhor() -> None:
+    data = series(
+        market_candle(0, low="9.8", high="10.2"),
+        market_candle(1, low="9.8", high="10.4"),
+        market_candle(2, low="9.7", high="10.5"),
+        market_candle(3, low="9.8", high="12.5"),
+    )
+    comparison = compare_exit_modes(
+        {Timeframe.M5: data},
+        FirstDecision(),
+        risk_profile=PROFILE,
+        position_context_provider=OppositePositionContext(),
+    )
+    assert comparison.fixed.trades[0].close_reason == "TARGET"
+    assert comparison.dynamic.trades[0].close_reason == "OPPOSITE_SIGNAL"
+    assert comparison.fixed.metrics.net_profit > comparison.dynamic.metrics.net_profit
 
 
 def test_split_temporal_60_20_20() -> None:

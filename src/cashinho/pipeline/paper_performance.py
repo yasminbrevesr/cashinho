@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from cashinho.pipeline.paper_broker import PaperOrder, PaperOrderStatus
@@ -47,6 +47,43 @@ def initial_risk(order: PaperOrder) -> Decimal:
     return (abs(entry - order.ticket.stop) * order.ticket.quantity).quantize(Decimal("0.01"))
 
 
+def calculate_position_pnl(
+    *,
+    side: str,
+    entry_price: Decimal,
+    exit_price: Decimal,
+    stop: Decimal,
+    quantity: int,
+    entered_at: datetime | None = None,
+    exited_at: datetime | None = None,
+    costs: Decimal = ZERO,
+) -> PaperPnL:
+    """Implementação única de P&L usada pelo PAPER e pelo backtest."""
+
+    if side not in {"BUY", "SELL"}:
+        raise ValueError("Lado deve ser BUY ou SELL.")
+    if entry_price <= 0 or exit_price <= 0 or stop <= 0:
+        raise ValueError("Preços de entrada, saída e stop devem ser positivos.")
+    if quantity <= 0:
+        raise ValueError("Quantidade deve ser maior que zero.")
+    if costs < 0:
+        raise ValueError("Custos não podem ser negativos.")
+    if entered_at is not None and exited_at is not None and exited_at < entered_at:
+        raise ValueError("Horário de saída não pode preceder a entrada.")
+
+    units = Decimal(quantity)
+    direction = Decimal("1") if side == "BUY" else Decimal("-1")
+    pnl = (
+        (exit_price - entry_price) * units * direction - costs
+    ).quantize(Decimal("0.01"))
+    notional = abs(entry_price * units)
+    pnl_pct = (pnl / notional * HUNDRED).quantize(Decimal("0.01")) if notional else ZERO
+    risk = (abs(entry_price - stop) * units).quantize(Decimal("0.01"))
+    result_in_r = (pnl / risk).quantize(Decimal("0.01")) if risk else ZERO
+    duration = exited_at - entered_at if entered_at is not None and exited_at is not None else None
+    return PaperPnL(pnl, pnl_pct, result_in_r, risk, duration)
+
+
 def calculate_pnl(
     order: PaperOrder,
     *,
@@ -60,19 +97,20 @@ def calculate_pnl(
     if exit_price <= 0:
         raise ValueError("Preço de saída deve ser maior que zero.")
 
-    quantity = Decimal(order.ticket.quantity)
-    direction = Decimal("1") if order.ticket.side == "BUY" else Decimal("-1")
-    pnl = ((exit_price - order.fill_price) * quantity * direction).quantize(Decimal("0.01"))
-    notional = abs(order.fill_price * quantity)
-    pnl_pct = (pnl / notional * HUNDRED).quantize(Decimal("0.01")) if notional else ZERO
-    risk = initial_risk(order)
-    result_in_r = (pnl / risk).quantize(Decimal("0.01")) if risk else ZERO
-    duration = None
+    exited_at = None
     if realized:
         if order.closed_at is None:
             raise ValueError("Resultado realizado exige horário de encerramento.")
-        duration = order.closed_at - order.filled_at
-    return PaperPnL(pnl, pnl_pct, result_in_r, risk, duration)
+        exited_at = order.closed_at
+    return calculate_position_pnl(
+        side=order.ticket.side,
+        entry_price=order.fill_price,
+        exit_price=exit_price,
+        stop=order.ticket.stop,
+        quantity=order.ticket.quantity,
+        entered_at=order.filled_at,
+        exited_at=exited_at,
+    )
 
 
 def realized_pnl(order: PaperOrder) -> PaperPnL | None:

@@ -8,7 +8,7 @@ import streamlit as st
 
 from app.components.chrome import page_header, sidebar
 from app.components.feed import render_feed_status
-from app.components.journal import decision_rows, paper_trade_rows
+from app.components.journal import operational_decision_rows, paper_trade_rows
 from app.components.paper_summary import money
 from app.runtime import build_paper_broker, journal_session_factory
 from cashinho.adapters.persistence.repositories import JournalRepository
@@ -64,6 +64,7 @@ summary = summarize_orders(
 with journal_session_factory()() as session:
     repository = JournalRepository(session)
     decisions = repository.list_recent_decisions(limit=20)
+    position_decisions = repository.list_recent_position_decisions(limit=20)
     trades = repository.list_recent_paper_trades(limit=20)
     today = clock.now().date()
     day_start = datetime.combine(today, time.min, tzinfo=UTC)
@@ -86,10 +87,14 @@ if summary.unpriced_positions:
 
 st.divider()
 st.subheader("Últimas decisões")
-if decisions:
-    st.dataframe(decision_rows(decisions), use_container_width=True, hide_index=True)
+if decisions or position_decisions:
+    st.dataframe(
+        operational_decision_rows(decisions, position_decisions)[:20],
+        use_container_width=True,
+        hide_index=True,
+    )
 else:
-    st.info("Nenhuma FinalDecision auditada ainda.")
+    st.info("Nenhuma decisão operacional auditada ainda.")
 
 st.divider()
 st.subheader("Últimas operações")

@@ -3,14 +3,23 @@
 ## Fluxo conceitual
 
 ```text
-Market Data → Data Quality → Market Context → Technical Analysis
-→ Multi-Timeframe Engine → Strategy Engine → Opportunity → Scoring
-→ Contrarian Auditor → Risk Manager → Position Sizing
-→ Genial Ticket Generator → Paper Broker / Confirmação Humana → Journal
+Market Data → Data Quality → Market Regime → Technical Analysis
+→ Multi-Timeframe → Timeframe Advisor → Entry Signal → FinalDecision
+→ Risk Manager → Paper Broker → Position Manager → P&L → Journal
 ```
 
 Estratégias **não** enviam ordens. Elas produzem `Opportunity`. Somente o pipeline
 chama o Risk Manager, e nenhuma rejeição de risco pode ser sobrescrita.
+
+Antes do fill, `FinalDecision` é a única autoridade para `ENTRADA LIBERADA` ou
+`NÃO ENTRAR`. Depois do fill, `PositionManager` assume exclusivamente a decisão
+`HOLD/EXIT`; ele nunca cria uma posição contrária. STOP e TARGET continuam sob
+autoridade do `PaperBroker`. Saídas dinâmicas voltam ao broker por
+`close_position()` e ficam bloqueadas sem bid/ask válido.
+
+O backtest reutiliza as duas decisões em ordem cronológica e compara duas bases:
+STOP+TARGET e STOP+TARGET+PositionManager. O cálculo de P&L é compartilhado com
+o PAPER, em `paper_performance.py`.
 
 ## Camadas
 
@@ -39,6 +48,9 @@ A interface nunca contém regra de negócio. O domínio nunca importa `streamlit
 | D8 | Risk Manager fora do caminho da estratégia | — |
 | D9 | Capacidade do provedor limita o modo de operação | — |
 | D10 | Score derivado de vetor de fatores explícito | — |
+| D11 | Entrada (`FinalDecision`) e gestão (`PositionDecision`) são separadas | — |
+| D12 | Paper Broker é a única autoridade de execução simulada | — |
+| D13 | Saída dinâmica sem book produz recomendação, nunca fill inventado | — |
 
 ## Fases
 
@@ -54,4 +66,5 @@ A interface nunca contém regra de negócio. O domínio nunca importa `streamlit
 | 6 | Persistência com Alembic e diário completo | — |
 | 7 | Genial Ticket Generator e System Health completo | — |
 
-Estratégias, scanner, backtest, replay e paper broker só depois da Fase 7.
+O produto atual permanece estritamente PAPER. `NÃO ENTRAR` e `MANTER` são
+decisões válidas; não existe caminho de execução real.

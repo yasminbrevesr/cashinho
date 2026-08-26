@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from cashinho.domain.journal import DecisionJournalRecord, PaperTradeJournalRecord
+from cashinho.domain.journal import (
+    DecisionJournalRecord,
+    PaperTradeJournalRecord,
+    PositionDecisionJournalRecord,
+)
 
 
 def decision_rows(records: list[DecisionJournalRecord]) -> list[dict[str, Any]]:
@@ -37,3 +41,25 @@ def paper_trade_rows(records: list[PaperTradeJournalRecord]) -> list[dict[str, A
         }
         for record in records
     ]
+
+
+def operational_decision_rows(
+    entries: list[DecisionJournalRecord],
+    positions: list[PositionDecisionJournalRecord],
+) -> list[dict[str, Any]]:
+    """Une ENTRAR/NÃO ENTRAR e MANTER/SAIR em uma cronologia simples."""
+
+    rows = decision_rows(entries)
+    rows.extend(
+        {
+            "Ativo": record.symbol,
+            "Decisão": "MANTER" if record.action == "HOLD" else "SAIR",
+            "Lado": record.side,
+            "Timeframe": "—",
+            "Confiança": record.confidence,
+            "Horário (UTC)": record.timestamp,
+            "Motivo principal": record.primary_reason,
+        }
+        for record in positions
+    )
+    return sorted(rows, key=lambda row: row["Horário (UTC)"], reverse=True)

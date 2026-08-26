@@ -15,7 +15,7 @@ from cashinho.adapters.persistence.repositories import AnalysisRunRepository, Jo
 from cashinho.adapters.persistence.session import resolve_database_url, session_scope
 from cashinho.domain.enums import DataStatus, Mode, OpportunityState, Timeframe
 from cashinho.domain.journal import AnalysisRun, JournalEntry
-from cashinho.domain.market import Candle
+from cashinho.domain.market import Candle, CandleSeries
 from cashinho.domain.quality import DataQualityReport
 from cashinho.pipeline.final_decision import FinalDecision
 from cashinho.pipeline.journal_audit import JournalAuditService
@@ -26,6 +26,12 @@ from cashinho.pipeline.paper_broker import (
     PaperOrderType,
 )
 from cashinho.pipeline.paper_ticket import build_paper_ticket
+from cashinho.pipeline.position_manager import (
+    PositionAction,
+    PositionManager,
+    PositionRiskState,
+    apply_position_decision,
+)
 from tests.conftest import REFERENCE_INSTANT
 
 pytestmark = pytest.mark.integration
@@ -50,6 +56,8 @@ def test_tabelas_criadas(sqlite_engine: Engine) -> None:
         "journal_entries",
         "decision_journal",
         "paper_trade_journal",
+        "paper_order_events",
+        "position_decision_journal",
     } <= tabelas
 
 
@@ -150,6 +158,85 @@ def test_ordem_aberta_e_encerrada_atualiza_diario(
     assert records[0].status == "CLOSED"
     assert records[0].pnl_value == Decimal("10.00")
     assert records[0].result_in_r == Decimal("1.00")
+
+
+def test_ciclo_integrado_decisao_posicao_saida_pnl_e_diario(
+    session_factory: sessionmaker[Session],
+) -> None:
+    audit = JournalAuditService(session_factory)
+    entry_decision = FinalDecision(
+        should_enter=True,
+        side="BUY",
+        symbol="PETR4",
+        timeframe=Timeframe.M5,
+        confidence=84,
+        entry=Decimal("10"),
+        stop=Decimal("9"),
+        target=Decimal("12"),
+        risk_reward=2.0,
+        primary_reason="Entrada aprovada.",
+        reasons=("Gatilho confirmado.",),
+        timestamp=REFERENCE_INSTANT - timedelta(minutes=10),
+    )
+    assert audit.record_decision(entry_decision)
+
+    broker = PaperBroker(InMemoryPaperOrderRepository(), observer=audit)
+    order = broker.register(
+        build_paper_ticket(
+            symbol="PETR4",
+            side="BUY",
+            entry=Decimal("10"),
+            stop=Decimal("9"),
+            target=Decimal("12"),
+            quantity=10,
+            timeframe="5m",
+        ),
+        PaperOrderType.LIMIT,
+        now=entry_decision.timestamp,
+    )
+    opening_candle = Candle(
+        open_time=REFERENCE_INSTANT - timedelta(minutes=5),
+        close_time=REFERENCE_INSTANT,
+        open=Decimal("10"),
+        high=Decimal("10.4"),
+        low=Decimal("9.6"),
+        close=Decimal("10.2"),
+        volume=100,
+    )
+    opened = broker.process_candle(opening_candle)[0]
+    candles = CandleSeries(
+        symbol="PETR4",
+        timeframe=Timeframe.M5,
+        candles=(opening_candle,),
+        source="test",
+        fetched_at=REFERENCE_INSTANT,
+    )
+    position_decision = PositionManager().evaluate(
+        opened,
+        recent_candles=candles,
+        technical_signal=None,
+        timeframe_advice=None,
+        risk=PositionRiskState(True, "Risk Manager exigiu saída."),
+        current_price=Decimal("11"),
+        market_exit_price=Decimal("11"),
+    )
+    assert position_decision.action is PositionAction.EXIT
+    assert audit.record_position_decision(order.id, position_decision)
+    assert not audit.record_position_decision(order.id, position_decision)
+    closed = apply_position_decision(broker, opened, position_decision)
+    assert closed is not None
+    assert closed.close_reason == "RISK_EXIT"
+
+    with session_factory() as session:
+        repository = JournalRepository(session)
+        assert repository.list_recent_decisions()[0].should_enter
+        assert repository.list_recent_position_decisions()[0].action == "EXIT"
+        events = repository.list_recent_paper_order_events()
+        trade = repository.list_recent_paper_trades()[0]
+    assert {event.status for event in events} >= {"PENDING", "OPEN", "CLOSED"}
+    assert trade.status == "CLOSED"
+    assert trade.pnl_value == Decimal("10.00")
+    assert trade.result_in_r == Decimal("1.00")
 
 
 def test_gravacao_e_leitura_do_diario(session_factory: sessionmaker[Session]) -> None:

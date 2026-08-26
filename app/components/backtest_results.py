@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pandas as pd
 import streamlit as st
 
-from cashinho.pipeline.backtest import BacktestResult, metrics_by
+from cashinho.pipeline.backtest import BacktestComparison, BacktestResult, metrics_by
 
 
 def _value(value: object, suffix: str = "") -> str:
@@ -56,6 +58,21 @@ def render_backtest_result(result: BacktestResult, *, initial_capital: object) -
     st.markdown("#### Trades")
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
+    reasons = Counter(trade.close_reason for trade in result.trades)
+    st.markdown("#### Encerramentos por motivo")
+    st.dataframe(
+        [
+            {
+                "Motivo": reason,
+                "Trades": count,
+                "Participação": f"{count / len(result.trades) * 100:.1f}%",
+            }
+            for reason, count in reasons.most_common()
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
     side_metrics = metrics_by(result.trades, initial_capital=initial_capital, field="side")
     timeframe_metrics = metrics_by(
         result.trades, initial_capital=initial_capital, field="timeframe"
@@ -91,3 +108,34 @@ def render_backtest_result(result: BacktestResult, *, initial_capital: object) -
         hide_index=True,
         use_container_width=True,
     )
+
+
+def render_backtest_comparison(
+    comparison: BacktestComparison, *, initial_capital: object
+) -> None:
+    """Compara sem atribuir superioridade prévia à saída dinâmica."""
+
+    rows = []
+    for label, result in (
+        ("A · STOP + TARGET", comparison.fixed),
+        ("B · + POSITION MANAGER", comparison.dynamic),
+    ):
+        metrics = result.metrics
+        rows.append(
+            {
+                "Modo": label,
+                "Trades": metrics.total_trades,
+                "Expectancy": metrics.expectancy,
+                "Profit factor": metrics.profit_factor,
+                "Drawdown R$": metrics.max_drawdown,
+                "Resultado em R": metrics.total_r,
+                "Resultado R$": metrics.net_profit,
+            }
+        )
+    st.markdown("### Comparação das formas de saída")
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    fixed_tab, dynamic_tab = st.tabs(["MODO A", "MODO B"])
+    with fixed_tab:
+        render_backtest_result(comparison.fixed, initial_capital=initial_capital)
+    with dynamic_tab:
+        render_backtest_result(comparison.dynamic, initial_capital=initial_capital)

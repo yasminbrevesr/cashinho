@@ -16,22 +16,30 @@ from cashinho.adapters.persistence.mappers import (
     analysis_run_to_row,
     decision_record_to_row,
     journal_entry_to_row,
+    paper_order_event_to_row,
     paper_trade_record_to_row,
+    position_decision_record_to_row,
     row_to_decision_record,
     row_to_journal_entry,
+    row_to_paper_order_event,
     row_to_paper_trade_record,
+    row_to_position_decision_record,
 )
 from cashinho.adapters.persistence.models import (
     AnalysisRunRow,
     DecisionJournalRow,
     JournalEntryRow,
+    PaperOrderEventRow,
     PaperTradeJournalRow,
+    PositionDecisionJournalRow,
 )
 from cashinho.domain.journal import (
     AnalysisRun,
     DecisionJournalRecord,
     JournalEntry,
+    PaperOrderEventRecord,
     PaperTradeJournalRecord,
+    PositionDecisionJournalRecord,
 )
 
 
@@ -102,6 +110,56 @@ class JournalRepository:
             .limit(limit)
         )
         return [row_to_paper_trade_record(row) for row in self._session.scalars(stmt)]
+
+    def record_position_decision(self, record: PositionDecisionJournalRecord) -> bool:
+        """Registra apenas uma mudança relevante; HOLD repetido não polui o diário."""
+
+        if self._session.get(PositionDecisionJournalRow, record.idempotency_key) is not None:
+            return False
+        latest_stmt = (
+            select(PositionDecisionJournalRow)
+            .where(PositionDecisionJournalRow.paper_order_id == record.paper_order_id)
+            .order_by(PositionDecisionJournalRow.timestamp.desc())
+            .limit(1)
+        )
+        latest = self._session.scalar(latest_stmt)
+        if (
+            latest is not None
+            and latest.action == record.action
+            and latest.exit_reason == record.exit_reason
+            and latest.primary_reason == record.primary_reason
+        ):
+            return False
+        self._session.add(position_decision_record_to_row(record))
+        return True
+
+    def list_recent_position_decisions(
+        self, limit: int = 50
+    ) -> list[PositionDecisionJournalRecord]:
+        stmt = (
+            select(PositionDecisionJournalRow)
+            .order_by(PositionDecisionJournalRow.timestamp.desc())
+            .limit(limit)
+        )
+        return [
+            row_to_position_decision_record(row) for row in self._session.scalars(stmt)
+        ]
+
+    def record_paper_order_event(self, record: PaperOrderEventRecord) -> bool:
+        if self._session.get(PaperOrderEventRow, record.idempotency_key) is not None:
+            return False
+        self._session.add(paper_order_event_to_row(record))
+        return True
+
+    def list_recent_paper_order_events(
+        self, limit: int = 50
+    ) -> list[PaperOrderEventRecord]:
+        stmt = (
+            select(PaperOrderEventRow)
+            .order_by(PaperOrderEventRow.timestamp.desc())
+            .limit(limit)
+        )
+        return [row_to_paper_order_event(row) for row in self._session.scalars(stmt)]
 
 
 class AnalysisRunRepository:

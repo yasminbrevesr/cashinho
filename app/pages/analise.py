@@ -25,6 +25,7 @@ from app.components.chrome import page_header, sidebar
 from app.components.decision_card import render_decision_card
 from app.components.feed import render_feed_status, render_source_banner
 from app.components.paper_orders import render_paper_orders
+from app.components.position_card import render_position_card
 from app.components.quality import quality_panel
 from app.runtime import build_paper_broker
 from cashinho.adapters.providers.csv_provider import ProviderError
@@ -42,10 +43,16 @@ from cashinho.pipeline.market_data import load_market_data
 from cashinho.pipeline.multi_timeframe import advise_timeframe, analyze_timeframes
 from cashinho.pipeline.opportunities import build_opportunity
 from cashinho.pipeline.paper_broker import PaperOrderType
+from cashinho.pipeline.paper_market import collect_paper_market
 from cashinho.pipeline.paper_ticket import (
     build_paper_ticket,
     calculate_ticket_sizing,
 )
+from cashinho.pipeline.position_manager import (
+    PositionRiskState,
+    apply_position_decision,
+)
+from cashinho.pipeline.position_monitoring import evaluate_open_position
 
 INSPECTION_MODE = Mode.RESEARCH
 
@@ -588,6 +595,64 @@ last_closed = closed_series.last
 if last_closed is not None:
     paper_broker.process_candle(last_closed, symbol=symbol, timeframe=timeframe.value)
 
+# Uma posição aberta tem prioridade absoluta sobre qualquer nova decisão de entrada.
+open_position = next(
+    (
+        order
+        for order in paper_broker.list_orders()
+        if order.ticket.symbol == symbol and order.status.value == "OPEN"
+    ),
+    None,
+)
+position_decision = None
+if open_position is not None:
+    position_timeframe = (
+        Timeframe(open_position.ticket.timeframe)
+        if open_position.ticket.timeframe in {item.value for item in Timeframe}
+        else timeframe
+    )
+    position_series = series_by_timeframe.get(position_timeframe, closed_series)
+    if position_series.last is not None:
+        paper_broker.process_candle(
+            position_series.last,
+            symbol=symbol,
+            timeframe=position_timeframe.value,
+        )
+    open_position = next(
+        (
+            order
+            for order in paper_broker.list_orders()
+            if order.id == open_position.id and order.status.value == "OPEN"
+        ),
+        None,
+    )
+    if open_position is not None:
+        paper_market = collect_paper_market(
+            provider,
+            [open_position],
+            clock=clock,
+            max_age_seconds=settings.mt5_stale_seconds,
+        )
+        monitored = evaluate_open_position(
+            open_position,
+            series_by_timeframe=series_by_timeframe,
+            selection=selection,
+            risk=PositionRiskState(
+                profile_base.kill_switch_active,
+                "Risk Manager está com kill switch ativo.",
+            ),
+            current_price=paper_market.market_prices.get(symbol),
+            market_exit_price=paper_market.close_prices.get(open_position.id),
+        )
+        position_decision = monitored.decision
+        journal_audit.record_position_decision(open_position.id, position_decision)
+        apply_position_decision(paper_broker, open_position, position_decision)
+        timeframe = monitored.operational_timeframe
+        if timeframe in raw_series_by_timeframe:
+            series = raw_series_by_timeframe[timeframe]
+            panel = compute_panel(series, selection)
+            closed_series = series.closed_only()
+
 
 # ============================================================
 # OPORTUNIDADE ATUAL
@@ -596,7 +661,9 @@ if last_closed is not None:
 st.divider()
 last_price = series.last.close if series.last else None
 entrada_liberada = (
-    decision.should_enter
+    open_position is None
+    and position_decision is None
+    and decision.should_enter
     and decision.side in {"BUY", "SELL"}
     and decision.entry is not None
     and decision.stop is not None
@@ -607,13 +674,16 @@ if st.session_state.get("paper_ticket_context") != ticket_context:
     st.session_state["paper_ticket_context"] = ticket_context
     st.session_state["paper_ticket_open"] = False
 
-if render_decision_card(
-    decision,
-    symbol=symbol,
-    last_price=last_price,
-    feed_label="MT5 ONLINE" if choice.is_metatrader else "DADOS HISTÓRICOS",
-):
-    st.session_state["paper_ticket_open"] = True
+if open_position is not None and position_decision is not None:
+    render_position_card(open_position, position_decision)
+else:
+    if render_decision_card(
+        decision,
+        symbol=symbol,
+        last_price=last_price,
+        feed_label="MT5 ONLINE" if choice.is_metatrader else "DADOS HISTÓRICOS",
+    ):
+        st.session_state["paper_ticket_open"] = True
 
 
 # ============================================================

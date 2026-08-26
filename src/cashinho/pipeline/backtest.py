@@ -2,27 +2,43 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol
 
 from cashinho.domain.enums import DataStatus, Timeframe
 from cashinho.domain.errors import LookaheadError
 from cashinho.domain.market import Candle, CandleSeries
 from cashinho.domain.risk import RiskProfile
+from cashinho.pipeline.entry_signal import EntrySignal
 from cashinho.pipeline.final_decision import FinalDecision, make_final_decision
 from cashinho.pipeline.indicators import IndicatorSelection
 from cashinho.pipeline.multi_timeframe import (
+    TimeframeAdvice,
     TimeframeAnalysis,
     advise_timeframe,
     analyze_timeframes,
 )
 from cashinho.pipeline.opportunities import build_opportunity
-from cashinho.pipeline.paper_ticket import calculate_ticket_sizing
+from cashinho.pipeline.paper_broker import PaperOrder, PaperOrderStatus, PaperOrderType
+from cashinho.pipeline.paper_performance import calculate_position_pnl
+from cashinho.pipeline.paper_ticket import build_paper_ticket, calculate_ticket_sizing
+from cashinho.pipeline.position_manager import (
+    PositionExitReason,
+    PositionManager,
+    PositionRiskState,
+)
 
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
+
+
+class BacktestExitMode(StrEnum):
+    FIXED = "STOP_TARGET"
+    DYNAMIC = "POSITION_MANAGER"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +127,19 @@ class BacktestResult:
     open_positions_at_end: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class BacktestComparison:
+    fixed: BacktestResult
+    dynamic: BacktestResult
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalPositionContext:
+    recent_candles: CandleSeries
+    technical_signal: EntrySignal
+    timeframe_advice: TimeframeAdvice
+
+
 class HistoricalDecisionEvaluator(Protocol):
     def evaluate(
         self,
@@ -118,6 +147,16 @@ class HistoricalDecisionEvaluator(Protocol):
         *,
         as_of: datetime,
     ) -> FinalDecision: ...
+
+
+class HistoricalPositionContextProvider(Protocol):
+    def position_context(
+        self,
+        series_by_timeframe: dict[Timeframe, CandleSeries],
+        *,
+        as_of: datetime,
+        preferred_timeframe: Timeframe,
+    ) -> HistoricalPositionContext: ...
 
 
 @dataclass(slots=True)
@@ -194,6 +233,34 @@ class PipelineDecisionEvaluator:
             minimum_risk_reward=self.risk_profile.min_risk_reward,
         )
 
+    def position_context(
+        self,
+        series_by_timeframe: dict[Timeframe, CandleSeries],
+        *,
+        as_of: datetime,
+        preferred_timeframe: Timeframe,
+    ) -> HistoricalPositionContext:
+        """Expõe o mesmo contexto técnico, sem qualquer candle posterior a ``as_of``."""
+
+        for series in series_by_timeframe.values():
+            series.require_closed()
+            if series.last is not None and series.last.close_time > as_of:
+                raise LookaheadError("Contexto de posição recebeu candle posterior ao relógio.")
+        analyses = analyze_timeframes(series_by_timeframe, self.selection)
+        advice = advise_timeframe(analyses)
+        operational = (
+            preferred_timeframe
+            if preferred_timeframe in analyses
+            else advice.recommended_timeframe
+            if advice.recommended_timeframe in analyses
+            else min(analyses, key=lambda timeframe: timeframe.duration)
+        )
+        return HistoricalPositionContext(
+            recent_candles=series_by_timeframe[operational],
+            technical_signal=analyses[operational].signal,
+            timeframe_advice=advice,
+        )
+
 
 def truncate_at(series: CandleSeries, as_of: datetime) -> CandleSeries:
     """Projeta somente candles já fechados no instante lógico."""
@@ -225,17 +292,29 @@ def _close_trade(
     assert decision.target is not None
     entry_execution = costs.entry_price(decision.entry, decision.side)
     exit_execution = costs.exit_price(raw_exit, decision.side)
-    direction = Decimal("1") if decision.side == "BUY" else Decimal("-1")
-    units = Decimal(quantity)
-    gross = ((raw_exit - decision.entry) * units * direction).quantize(Decimal("0.01"))
     fees = costs.fees(entry_execution, exit_execution, quantity)
-    execution_pnl = (exit_execution - entry_execution) * units * direction
-    net = (execution_pnl - fees).quantize(Decimal("0.01"))
+    gross_result = calculate_position_pnl(
+        side=decision.side,
+        entry_price=decision.entry,
+        exit_price=raw_exit,
+        stop=decision.stop,
+        quantity=quantity,
+        entered_at=entered_at,
+        exited_at=candle.close_time,
+    )
+    net_result = calculate_position_pnl(
+        side=decision.side,
+        entry_price=entry_execution,
+        exit_price=exit_execution,
+        stop=decision.stop,
+        quantity=quantity,
+        entered_at=entered_at,
+        exited_at=candle.close_time,
+        costs=fees,
+    )
+    gross = gross_result.pnl_value
+    net = net_result.pnl_value
     cost_value = (gross - net).quantize(Decimal("0.01"))
-    notional = abs(entry_execution * units)
-    pnl_pct = (net / notional * HUNDRED).quantize(Decimal("0.01")) if notional else ZERO
-    initial_risk = abs(decision.entry - decision.stop) * units
-    result_in_r = (net / initial_risk).quantize(Decimal("0.01"))
     return BacktestTrade(
         symbol=decision.symbol,
         side=decision.side,
@@ -253,9 +332,9 @@ def _close_trade(
         gross_pnl=gross,
         costs=cost_value,
         net_pnl=net,
-        pnl_pct=pnl_pct,
-        result_in_r=result_in_r,
-        duration=candle.close_time - entered_at,
+        pnl_pct=net_result.pnl_pct,
+        result_in_r=net_result.result_in_r,
+        duration=net_result.duration or timedelta(),
     )
 
 
@@ -268,6 +347,36 @@ def _quantity_for(decision: FinalDecision, profile: RiskProfile) -> int:
     ).quantity
 
 
+def _position_for_backtest(
+    decision: FinalDecision,
+    *,
+    quantity: int,
+    entered_at: datetime,
+) -> PaperOrder:
+    assert decision.entry is not None
+    assert decision.stop is not None
+    assert decision.target is not None
+    assert decision.timeframe is not None
+    return PaperOrder(
+        id=f"backtest:{decision.symbol}:{decision.timestamp.isoformat()}",
+        ticket=build_paper_ticket(
+            symbol=decision.symbol,
+            side=decision.side,
+            entry=decision.entry,
+            stop=decision.stop,
+            target=decision.target,
+            quantity=quantity,
+            min_risk_reward=ZERO,
+            timeframe=decision.timeframe.value,
+        ),
+        order_type=PaperOrderType.LIMIT,
+        status=PaperOrderStatus.OPEN,
+        created_at=decision.timestamp,
+        filled_at=entered_at,
+        fill_price=decision.entry,
+    )
+
+
 def run_backtest(
     series_by_timeframe: dict[Timeframe, CandleSeries],
     evaluator: HistoricalDecisionEvaluator,
@@ -275,6 +384,9 @@ def run_backtest(
     risk_profile: RiskProfile,
     costs: ExecutionCostModel | None = None,
     decision_timeframe: Timeframe | None = None,
+    exit_mode: BacktestExitMode = BacktestExitMode.FIXED,
+    position_manager: PositionManager | None = None,
+    position_context_provider: HistoricalPositionContextProvider | None = None,
 ) -> BacktestResult:
     """Executa candle a candle, com uma posição por ativo e STOP conservador."""
     if not series_by_timeframe:
@@ -292,6 +404,12 @@ def run_backtest(
         raise ValueError("Timeframe do relógio de decisão não está disponível.")
     decision_times = {candle.close_time for candle in closed[decision_clock].candles}
     cost_model = costs or ExecutionCostModel()
+    manager = position_manager or PositionManager()
+    context_provider = position_context_provider
+    if context_provider is None and isinstance(evaluator, PipelineDecisionEvaluator):
+        context_provider = evaluator
+    if exit_mode is BacktestExitMode.DYNAMIC and context_provider is None:
+        raise ValueError("Modo dinâmico exige um provedor de contexto de posição.")
 
     pending: FinalDecision | None = None
     entered_at: datetime | None = None
@@ -338,6 +456,60 @@ def run_backtest(
                     pending = None
                     entered_at = None
                     quantity = 0
+                elif (
+                    exit_mode is BacktestExitMode.DYNAMIC
+                    and candle.close_time in decision_times
+                    and candle.close_time > entered_at
+                    and context_provider is not None
+                ):
+                    prefixes = {
+                        timeframe: truncate_at(series, candle.close_time)
+                        for timeframe, series in closed.items()
+                    }
+                    assert pending.timeframe is not None
+                    context = context_provider.position_context(
+                        prefixes,
+                        as_of=candle.close_time,
+                        preferred_timeframe=pending.timeframe,
+                    )
+                    context_last = context.recent_candles.last
+                    if context_last is None or context_last.close_time != candle.close_time:
+                        continue
+                    position_decision = manager.evaluate(
+                        _position_for_backtest(
+                            pending,
+                            quantity=quantity,
+                            entered_at=entered_at,
+                        ),
+                        recent_candles=context.recent_candles,
+                        technical_signal=context.technical_signal,
+                        timeframe_advice=context.timeframe_advice,
+                        risk=PositionRiskState(
+                            risk_profile.kill_switch_active,
+                            "Risk Manager exigiu encerramento no backtest.",
+                        ),
+                        current_price=candle.close,
+                        market_exit_price=candle.close,
+                    )
+                    if (
+                        position_decision.exit_reason
+                        not in {None, PositionExitReason.STOP, PositionExitReason.TARGET}
+                        and position_decision.exit_price is not None
+                    ):
+                        trades.append(
+                            _close_trade(
+                                pending,
+                                entered_at=entered_at,
+                                candle=candle,
+                                raw_exit=position_decision.exit_price,
+                                close_reason=position_decision.exit_reason.value,
+                                quantity=quantity,
+                                costs=cost_model,
+                            )
+                        )
+                        pending = None
+                        entered_at = None
+                        quantity = 0
             continue
 
         if candle.close_time not in decision_times:
@@ -378,6 +550,41 @@ def run_backtest(
         unfilled_signals=unfilled_signals,
         open_positions_at_end=int(pending is not None and entered_at is not None),
     )
+
+
+def compare_exit_modes(
+    series_by_timeframe: dict[Timeframe, CandleSeries],
+    evaluator: HistoricalDecisionEvaluator,
+    *,
+    risk_profile: RiskProfile,
+    costs: ExecutionCostModel | None = None,
+    decision_timeframe: Timeframe | None = None,
+    position_manager: PositionManager | None = None,
+    position_context_provider: HistoricalPositionContextProvider | None = None,
+) -> BacktestComparison:
+    """Executa os modos A/B com as mesmas entradas, dados e custos."""
+
+    fixed_evaluator = deepcopy(evaluator)
+    dynamic_evaluator = deepcopy(evaluator)
+    fixed = run_backtest(
+        series_by_timeframe,
+        fixed_evaluator,
+        risk_profile=risk_profile,
+        costs=costs,
+        decision_timeframe=decision_timeframe,
+        exit_mode=BacktestExitMode.FIXED,
+    )
+    dynamic = run_backtest(
+        series_by_timeframe,
+        dynamic_evaluator,
+        exit_mode=BacktestExitMode.DYNAMIC,
+        position_manager=position_manager,
+        position_context_provider=position_context_provider,
+        risk_profile=risk_profile,
+        costs=costs,
+        decision_timeframe=decision_timeframe,
+    )
+    return BacktestComparison(fixed, dynamic)
 
 
 def calculate_metrics(

@@ -13,14 +13,18 @@ from cashinho.adapters.persistence.models import (
     AnalysisRunRow,
     DecisionJournalRow,
     JournalEntryRow,
+    PaperOrderEventRow,
     PaperTradeJournalRow,
+    PositionDecisionJournalRow,
 )
 from cashinho.domain.enums import Mode, OpportunityState
 from cashinho.domain.journal import (
     AnalysisRun,
     DecisionJournalRecord,
     JournalEntry,
+    PaperOrderEventRecord,
     PaperTradeJournalRecord,
+    PositionDecisionJournalRecord,
 )
 
 
@@ -160,4 +164,56 @@ def row_to_paper_trade_record(row: PaperTradeJournalRow) -> PaperTradeJournalRec
         pnl_pct=row.pnl_pct,
         result_in_r=row.result_in_r,
         duration_seconds=row.duration_seconds,
+    )
+
+
+def position_decision_record_to_row(
+    record: PositionDecisionJournalRecord,
+) -> PositionDecisionJournalRow:
+    data = record.model_dump(exclude={"reasons"})
+    return PositionDecisionJournalRow(
+        **data,
+        reasons_json=json.dumps(record.reasons, ensure_ascii=False),
+    )
+
+
+def row_to_position_decision_record(
+    row: PositionDecisionJournalRow,
+) -> PositionDecisionJournalRecord:
+    return PositionDecisionJournalRecord(
+        idempotency_key=row.idempotency_key,
+        paper_order_id=row.paper_order_id,
+        timestamp=row.timestamp,
+        symbol=row.symbol,
+        side=row.side,
+        action=row.action,
+        confidence=row.confidence,
+        current_price=row.current_price,
+        stop=row.stop,
+        target=row.target,
+        exit_price=row.exit_price,
+        exit_reason=row.exit_reason,
+        primary_reason=row.primary_reason,
+        reasons=tuple(json.loads(row.reasons_json)),
+    )
+
+
+def paper_order_event_to_row(record: PaperOrderEventRecord) -> PaperOrderEventRow:
+    return PaperOrderEventRow(**record.model_dump())
+
+
+def row_to_paper_order_event(row: PaperOrderEventRow) -> PaperOrderEventRecord:
+    return PaperOrderEventRecord(
+        idempotency_key=row.idempotency_key,
+        paper_order_id=row.paper_order_id,
+        timestamp=row.timestamp,
+        symbol=row.symbol,
+        side=row.side,
+        status=row.status,
+        quantity=row.quantity,
+        fill_price=row.fill_price,
+        close_price=row.close_price,
+        close_reason=row.close_reason,
+        pnl_value=row.pnl_value,
+        result_in_r=row.result_in_r,
     )

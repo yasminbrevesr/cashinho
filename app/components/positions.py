@@ -10,11 +10,15 @@ import streamlit as st
 
 from cashinho.pipeline.paper_broker import PaperBroker, PaperOrder, PaperOrderStatus
 from cashinho.pipeline.paper_performance import realized_pnl, unrealized_pnl
+from cashinho.pipeline.position_manager import PositionAction, PositionDecision
 
 
 def _opened_rows(
-    orders: list[PaperOrder], market_prices: dict[str, Decimal]
+    orders: list[PaperOrder],
+    market_prices: dict[str, Decimal],
+    position_decisions: dict[str, PositionDecision] | None = None,
 ) -> list[dict[str, Any]]:
+    position_decisions = position_decisions or {}
     rows: list[dict[str, Any]] = []
     for order in orders:
         result = unrealized_pnl(order, market_prices.get(order.ticket.symbol))
@@ -29,6 +33,14 @@ def _opened_rows(
                 "Alvo": order.ticket.target,
                 "P&L atual": result.pnl_value if result else None,
                 "R atual": result.result_in_r if result else None,
+                "Decisão": (
+                    "SAIR"
+                    if position_decisions.get(order.id) is not None
+                    and position_decisions[order.id].action is PositionAction.EXIT
+                    else "MANTER"
+                    if position_decisions.get(order.id) is not None
+                    else "—"
+                ),
                 "Abertura (UTC)": order.filled_at,
             }
         )
@@ -80,13 +92,18 @@ def render_open_positions(
     market_prices: dict[str, Decimal],
     close_prices: dict[str, Decimal],
     now: datetime,
+    position_decisions: dict[str, PositionDecision] | None = None,
 ) -> None:
     opened = [order for order in orders if order.status is PaperOrderStatus.OPEN]
     st.subheader("Posições abertas")
     if not opened:
         st.info("Nenhuma posição PAPER aberta.")
         return
-    st.dataframe(_opened_rows(opened, market_prices), use_container_width=True, hide_index=True)
+    st.dataframe(
+        _opened_rows(opened, market_prices, position_decisions),
+        use_container_width=True,
+        hide_index=True,
+    )
     selected = st.selectbox(
         "Posição para encerrar",
         opened,
@@ -96,7 +113,7 @@ def render_open_positions(
     price = close_prices.get(selected.id)
     if price is None:
         st.warning("Encerramento bloqueado: a fonte não possui bid/ask ativo para esta posição.")
-    elif st.button("Fechar posição PAPER", type="primary", key="paper_close_button"):
+    elif st.button("Fechar posição PAPER manualmente", key="paper_close_button"):
         broker.close_position(selected.id, price=price, closed_at=now)
         st.success(f"Posição {selected.id[:8]} encerrada a {price} no ambiente PAPER.")
         st.rerun()
